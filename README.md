@@ -52,3 +52,10 @@ Gradio 5.49.1 cần `pydantic<2.12`, `starlette<1.0` và client 1.13.3. Một s�
 Ô 1 ghim FastAPI 0.115.12, Starlette 0.46.2, Pydantic 2.11.10 và kiểm tra import + HTTP `/config` của Gradio ở process mới. Nếu in **UI kiểm tra OK**, có thể tiếp tục; nếu có traceback thì gửi lỗi, không chạy tiếp. Không dùng `pip install -U pydantic starlette gradio-client` để chữa cảnh báo vì có thể phá Gradio 5. Sau khi cài, nếu kernel đã import phiên bản khác, **Runtime → Restart session**, chạy ô 2–5; ô 2 phát hiện module cũ và yêu cầu restart.
 
 Bộ Gradio/FastAPI/Starlette/Pydantic này đã qua `pip check` trong venv sạch và HTTP config smoke test trên CPU; không phải xác nhận toàn bộ môi trường Colab hay inference GPU.
+
+## Lỗi `custom_revision: v0.35.1 does not exist` và quy ước revision
+`custom_revision` của community pipeline phải là bản trần `"0.35.1"` (không có tiền tố `v`). Diffusers 0.35.1 tự đổi thành thư mục `v0.35.1` trên mirror `diffusers/community-pipelines-mirror` sau khi kiểm tra. Danh sách version trong thông báo lỗi được lấy trực tiếp từ PyPI nên có thể dài hơn bản đã cài — điều đó không có nghĩa runtime đang dùng bản khác.
+
+Runtime Colab mới bắt buộc chạy **ô 1** trước; nếu bỏ qua, Colab có sẵn diffusers khác bản ghim và ô 2 sẽ chặn lại với thông báo yêu cầu chạy ô 1. Notebook có canary `version("diffusers") != "0.35.1"` ngay trước khi nạp model.
+
+Đã kiểm chứng bằng cách chạy lại mã thật của diffusers 0.35.1 (môi trường sạch, không cần mạng): `"0.35.1"` đi qua guard và ghi `v0.35.1/lpw_stable_diffusion_xl.py` vào cache; `"v0.35.1"` gây đúng lỗi ValueError đã gặp trên Colab. Xem `tests/test_diffusers_revision.py`. Chưa chạy được bước tải model thật trên GPU Colab từ môi trường phát triển.

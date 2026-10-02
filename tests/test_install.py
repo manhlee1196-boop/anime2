@@ -33,6 +33,20 @@ class InstallTests(unittest.TestCase):
         with patch('subprocess.check_call', side_effect=[0, subprocess.CalledProcessError(1, 'check')]):
             with self.assertRaises(subprocess.CalledProcessError): exec(INSTALL, {})
 
+    def test_diffusers_canary_runs_after_version_import(self):
+        source = ''.join(NOTEBOOK['cells'][4]['source'])
+        canary = source.index('if version("diffusers")')
+        import_line = source.index('from importlib.metadata import version')
+        self.assertGreater(canary, import_line)
+
+    def test_diffusers_canary_blocks_unpinned_runtime(self):
+        source = ''.join(NOTEBOOK['cells'][4]['source'])
+        canary = source[source.index('# Runtime mới phải chạy ô 1 trước'):
+                        source.index('import torch, importlib, inspect')]
+        self.assertIn('if version("diffusers") != "0.35.1"', canary)
+        with self.assertRaisesRegex(RuntimeError, 'Chạy ô 1'):
+            exec(canary, {'version': lambda name: '0.40.0'})
+
     def test_loaded_old_module_requires_restart(self):
         with patch.dict(sys.modules, {'gradio': types.SimpleNamespace(__version__='old')}):
             with patch('importlib.metadata.version', return_value='5.49.1'):
