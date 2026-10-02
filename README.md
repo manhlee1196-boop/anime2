@@ -45,3 +45,10 @@ Kiểm thử AI trên CPU (cần PyTorch): kiến trúc với weights ngẫu nhi
 Biến `demo` chỉ tồn tại sau khi ô **4. Giao diện** chạy thành công trong cùng runtime. Nếu chỉ chạy ô mở link, ô giao diện gặp lỗi, hoặc runtime restart, hãy chạy lại ô **2 → 3 → 4 → 5** (không cần nạp lại model nếu ô 2 vẫn còn trong phiên). Đợi ô 4 in **Giao diện đã sẵn sàng** trước khi chạy ô 5. Nếu ô 4 báo lỗi, gửi traceback đầu tiên của ô 4 để chẩn đoán; không chỉ chạy lại ô nhập mật khẩu.
 
 Notebook kiểm tra prerequisites và trạng thái giao diện trước khi hỏi mật khẩu. Test không cần GPU: `python -m unittest discover -s tests -p test_launch.py -v`.
+
+## Cảnh báo dependency khi cài trên Colab
+Gradio 5.49.1 cần `pydantic<2.12`, `starlette<1.0` và client 1.13.3. Một số gói Colab hiện có (google-adk, google-genai, python-fasthtml, hf-gradio) cần các phiên bản mới hơn: chúng không tương thích hoàn toàn trong cùng phiên. Notebook không sử dụng các gói đó và không tự gỡ chúng. Nếu cần dùng Google ADK/GenAI, hãy dùng một runtime khác.
+
+Ô 1 ghim FastAPI 0.115.12, Starlette 0.46.2, Pydantic 2.11.10 và kiểm tra import + HTTP `/config` của Gradio ở process mới. Nếu in **UI kiểm tra OK**, có thể tiếp tục; nếu có traceback thì gửi lỗi, không chạy tiếp. Không dùng `pip install -U pydantic starlette gradio-client` để chữa cảnh báo vì có thể phá Gradio 5. Sau khi cài, nếu kernel đã import phiên bản khác, **Runtime → Restart session**, chạy ô 2–5; ô 2 phát hiện module cũ và yêu cầu restart.
+
+Bộ Gradio/FastAPI/Starlette/Pydantic này đã qua `pip check` trong venv sạch và HTTP config smoke test trên CPU; không phải xác nhận toàn bộ môi trường Colab hay inference GPU.
