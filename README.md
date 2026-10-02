@@ -59,3 +59,10 @@ Bộ Gradio/FastAPI/Starlette/Pydantic này đã qua `pip check` trong venv sạ
 Runtime Colab mới bắt buộc chạy **ô 1** trước; nếu bỏ qua, Colab có sẵn diffusers khác bản ghim và ô 2 sẽ chặn lại với thông báo yêu cầu chạy ô 1. Notebook có canary `version("diffusers") != "0.35.1"` ngay trước khi nạp model.
 
 Đã kiểm chứng bằng cách chạy lại mã thật của diffusers 0.35.1 (môi trường sạch, không cần mạng): `"0.35.1"` đi qua guard và ghi `v0.35.1/lpw_stable_diffusion_xl.py` vào cache; `"v0.35.1"` gây đúng lỗi ValueError đã gặp trên Colab. Xem `tests/test_diffusers_revision.py`. Chưa chạy được bước tải model thật trên GPU Colab từ môi trường phát triển.
+
+## Chế độ dùng tối đa GPU
+Từ bản này pipeline được đặt nguyên trên GPU bằng `pipe.to("cuda")` (FP16, ~7 GB — vừa T4 16 GB), bỏ CPU offload và VAE tiling/slicing nên mỗi bước diffusion không phải chuyển model qua lại giữa CPU/GPU: tạo ảnh nhanh hơn đáng kể. Ô tải model in thêm dòng VRAM đang dùng và `torch.backends.cudnn.benchmark = True` được bật cho các kích thước cố định.
+
+Upscale AI vẫn tạm dời 4 thành phần diffusion sang CPU để lấy VRAM, rồi **trả về đúng thiết bị/độ chính xác gốc** (GPU/FP16) sau khi xong — đã có test kiểm tra cả trường hợp gốc là GPU và gốc là CPU.
+
+Nếu GPU nhỏ hoặc gặp "CUDA out of memory": chạy một ô mới `pipe.enable_model_cpu_offload()` và `pipe.enable_vae_tiling()` để quay lại chế độ tiết kiệm VRAM; thông báo lỗi trong UI cũng gợi ý lệnh này. Vẫn chưa xác minh tốc độ/VRAM thực tế trên GPU Colab từ môi trường phát triển.

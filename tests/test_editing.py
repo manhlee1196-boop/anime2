@@ -9,6 +9,7 @@ import secrets
 import tempfile
 import time
 import types
+import unittest.mock
 import unittest
 from contextlib import nullcontext
 from pathlib import Path
@@ -196,7 +197,34 @@ class AIUpscaleTests(EditingTests):
         with patch('torch.cuda.is_available',return_value=True), patch('torch.cuda.empty_cache'):
             with self.assertRaisesRegex(ValueError,'Hết VRAM'):
                 self.ns['run_ai_upscale'](self.base,64,DummyProgress())
-        for component in modules.values(): component.to.assert_called_once_with('cpu')
+        for component in modules.values():
+            # Trước hết dời sang CPU; cuối cùng trả về vị trí gốc (Mock không đọc được
+            # parameters nên mặc định CPU/float32).
+            self.assertEqual(component.to.call_args_list[0],unittest.mock.call('cpu'))
+            self.assertEqual(component.to.call_args_list[-1].kwargs,
+                             dict(device=torch.device('cpu'),dtype=torch.float32))
+        self.assertEqual(model.to.call_args_list[-1].kwargs,dict(device='cpu',dtype=torch.float32))
+
+    def test_ai_restores_pipeline_to_original_gpu(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest('PyTorch needed for GPU lifecycle mock')
+        from unittest.mock import Mock, patch
+        model = Mock()
+        gpu_state = types.SimpleNamespace(device=torch.device('cuda'),dtype=torch.float16)
+        modules = {name: Mock() for name in ('text_encoder','text_encoder_2','unet','vae')}
+        for component in modules.values():
+            component.configure_mock(**{'parameters.return_value': iter([gpu_state])})
+        self.ns['pipe'] = types.SimpleNamespace(**modules)
+        self.ns['load_ai_model'] = lambda progress: model
+        self.ns['tiled_anime4x'] = lambda image, upscaled_model, tile, progress: image
+        with patch('torch.cuda.is_available',return_value=True), patch('torch.cuda.empty_cache'):
+            self.ns['run_ai_upscale'](self.base,64,DummyProgress())
+        for component in modules.values():
+            self.assertEqual(component.to.call_args_list[0],unittest.mock.call('cpu'))
+            self.assertEqual(component.to.call_args_list[-1].kwargs,
+                             dict(device=torch.device('cuda'),dtype=torch.float16))
         self.assertEqual(model.to.call_args_list[-1].kwargs,dict(device='cpu',dtype=torch.float32))
 
 
