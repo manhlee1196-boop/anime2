@@ -39,3 +39,9 @@ Kiểm thử xử lý mask, ghép vùng, crop, upscale và callbacks với pipel
 `python -m unittest discover -s tests -v` (cần Pillow và numpy, có sẵn khi cài Gradio).
 
 Kiểm thử AI trên CPU (cần PyTorch): kiến trúc với weights ngẫu nhiên, tải checkpoint giả lập an toàn, chia tile/ghép biên ảnh, resize/metadata, lỗi download và giải phóng GPU giả lập. Không phải kiểm thử chất lượng ảnh của weights pretrained.
+
+## Lỗi `demo is not defined`
+
+Biến `demo` chỉ tồn tại sau khi ô **4. Giao diện** chạy thành công trong cùng runtime. Nếu chỉ chạy ô mở link, ô giao diện gặp lỗi, hoặc runtime restart, hãy chạy lại ô **2 → 3 → 4 → 5** (không cần nạp lại model nếu ô 2 vẫn còn trong phiên). Đợi ô 4 in **Giao diện đã sẵn sàng** trước khi chạy ô 5. Nếu ô 4 báo lỗi, gửi traceback đầu tiên của ô 4 để chẩn đoán; không chỉ chạy lại ô nhập mật khẩu.
+
+Notebook kiểm tra prerequisites và trạng thái giao diện trước khi hỏi mật khẩu. Test không cần GPU: `python -m unittest discover -s tests -p test_launch.py -v`.
