@@ -13,6 +13,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 LIB = HERE / "noobai_lib.py"
 VI_LOCALE = HERE / "vi_VN.json"
+NOOB_TOOLS = HERE / "noob_tools.py"
 OUT = REPO / "NoobAI_XL_1.1_Colab.ipynb"
 
 GITHUB_USER_REPO = "manhlee1196-boop/anime2"
@@ -87,15 +88,29 @@ EXTRA_ARGS = ""  #@param {type:"string"}
 FORGE_COMMIT = "dfdcbab685e57677014f05a3309b48cc87383167"  #@param {type:"string"}
 
 #@markdown ### 🎛 Mặc định khi mở UI
-DEFAULT_WIDTH = 832  #@param {type:"integer"}
-DEFAULT_HEIGHT = 1216  #@param {type:"integer"}
+#@markdown Độ phân giải chuẩn (bucket ~1 MP mà NoobAI-XL được huấn luyện). Trong UI vẫn đổi được bằng dropdown 📐 dưới Width/Height.
+DEFAULT_RESOLUTION = "832x1216 (dọc 2:3 – chuẩn NoobAI)"  #@param ["832x1216 (dọc 2:3 – chuẩn NoobAI)", "1216x832 (ngang 3:2)", "1024x1024 (vuông)", "896x1152 (dọc 7:9)", "1152x896 (ngang 9:7)", "768x1344 (dọc 9:16)", "1344x768 (ngang 16:9)", "640x1536 (dọc 5:12)", "1536x640 (ngang 12:5)"]
+#@markdown Hoặc tự nhập (ví dụ `1024x1536`), để trống để dùng mục trên
+CUSTOM_RESOLUTION = ""  #@param {type:"string"}
 DEFAULT_STEPS = 28  #@param {type:"integer"}
 DEFAULT_CFG = 6.0  #@param {type:"number"}
 DEFAULT_SAMPLER = "Euler a"  #@param ["Euler a", "Euler", "DPM++ 2M", "DPM++ 2M SDE", "DPM++ 3M SDE", "DPM++ SDE", "Restart"]
 DEFAULT_SCHEDULER = "Automatic"  #@param ["Automatic", "Karras", "Exponential", "SGM Uniform", "Simple", "Normal"]
 CLIP_SKIP = 2  #@param {type:"integer"}
 
-import json, os
+#@markdown ### ✨ Tự fix (mở sẵn khi vào UI – tắt được từng ảnh bằng cách bỏ tích)
+#@markdown Hires. fix: vẽ ảnh ở độ phân giải chuẩn rồi tự phóng to bằng 4x-AnimeSharp và vẽ thêm chi tiết
+AUTO_HIRES_FIX = True  #@param {type:"boolean"}
+HIRES_UPSCALE_BY = 1.5  #@param [1.25, 1.5, 1.75, 2.0] {type:"raw"}
+HIRES_DENOISE = 0.4  #@param {type:"number"}
+#@markdown ADetailer: tự phát hiện và vẽ lại mặt (bộ 1) và tay (bộ 2) sau khi tạo ảnh
+AUTO_ADETAILER = "face+hand"  #@param ["face+hand", "face", "off"]
+
+import json, os, re
+_res = CUSTOM_RESOLUTION.strip() or DEFAULT_RESOLUTION
+_m = re.match(r"\s*(\d+)\s*[xX×]\s*(\d+)", _res)
+assert _m, f"Độ phân giải không hợp lệ: {_res!r} (đúng dạng 832x1216)"
+DEFAULT_WIDTH, DEFAULT_HEIGHT = (int(_m.group(1)) // 8 * 8, int(_m.group(2)) // 8 * 8)
 extensions = [k for k, on in {
     "tagcomplete": EXT_TAGCOMPLETE, "adetailer": EXT_ADETAILER, "image_browser": EXT_IMAGE_BROWSER,
     "ultimate_upscale": EXT_ULTIMATE_UPSCALE, "dynamic_prompts": EXT_DYNAMIC_PROMPTS,
@@ -112,6 +127,8 @@ config = dict(
     forge_commit=FORGE_COMMIT.strip(), default_width=DEFAULT_WIDTH, default_height=DEFAULT_HEIGHT,
     default_steps=DEFAULT_STEPS, default_cfg=DEFAULT_CFG, default_sampler=DEFAULT_SAMPLER,
     default_scheduler=DEFAULT_SCHEDULER, clip_skip=CLIP_SKIP,
+    auto_hires_fix=AUTO_HIRES_FIX, hires_upscale_by=float(HIRES_UPSCALE_BY), hires_denoise=float(HIRES_DENOISE),
+    auto_adetailer=AUTO_ADETAILER,
 )
 os.makedirs("/content", exist_ok=True)
 with open("/content/noobai_config.json", "w", encoding="utf-8") as f:
@@ -216,6 +233,31 @@ worst quality, old, early, low quality, lowres, signature, username, logo, bad h
 - Hires fix: 4x-AnimeSharp × 1.5, denoise 0.35–0.45 (đã đặt mặc định). ADetailer: bật `face_yolov8n.pt` để sửa mặt.
 - ControlNet Union ProMax: chọn model `xinsir_controlnet_union_sdxl_promax`, chọn preprocessor tương ứng (canny/depth/openpose/lineart/tile…).
 
+## 📐 Độ phân giải chuẩn
+NoobAI-XL (SDXL) được huấn luyện ở ~1 megapixel – vẽ đúng các cỡ này sẽ ít lỗi tay/chân/bố cục nhất:
+
+| Dọc | Ngang | Vuông |
+|---|---|---|
+| **832×1216** (2:3, khuyên dùng) | **1216×832** (3:2) | **1024×1024** |
+| 896×1152 (7:9) | 1152×896 (9:7) | |
+| 768×1344 (9:16 điện thoại) | 1344×768 (16:9 màn hình) | |
+| 640×1536 (5:12) | 1536×640 (12:5 banner) | |
+
+Trong UI: dropdown **📐 Độ phân giải chuẩn** nằm ngay dưới Width/Height (txt2img và img2img) – chọn là tự điền; kéo tay Width/Height thì dropdown chuyển sang *Tuỳ chỉnh*. Mặc định đặt ở cell 1 (`DEFAULT_RESOLUTION`).
+> Đừng vẽ thẳng 2048×2048 – model sẽ sinh thừa người/thừa chi. Muốn ảnh to hãy vẽ ở cỡ chuẩn rồi **tăng độ phân giải** như dưới.
+
+## 🔍 Tăng độ phân giải cho ảnh (3 cách, từ nhanh đến kỹ)
+1. **Hires. fix – ngay khi tạo ảnh (mặc định đã bật ✨)**: ảnh được vẽ ở cỡ chuẩn, phóng to bằng *4x-AnimeSharp* × **1.5** (832×1216 → 1248×1824) rồi vẽ thêm chi tiết với *Denoising* **0.4**.
+   - Muốn to hơn: *Phóng to gấp* 2.0 (→ 1664×2432, T4 mất ~2 phút/ảnh). Denoise 0.3 giữ sát ảnh gốc, 0.5 thêm chi tiết nhưng có thể đổi nét mặt.
+   - Tắt cho một ảnh: bỏ tích ở tiêu đề mục *Hires. fix*. Mẹo: vẽ nháp tắt Hires fix, tìm được seed ưng ý thì ♻️ dùng lại seed và bật Hires fix.
+2. **Extras – phóng to ảnh có sẵn, không vẽ lại (vài giây)**: tab *Công cụ thêm (Extras)* → kéo ảnh vào → *Upscaler 1* = `4x-AnimeSharp` (anime) hoặc `4x-UltraSharp` (chi tiết/thực), *Phóng to gấp* 2–4 → *Tạo ảnh*. Nhanh, giữ nguyên nội dung, nhưng không thêm chi tiết mới.
+3. **Ultimate SD Upscale – phóng to + vẽ lại chi tiết theo ô (kỹ nhất, 4K được)**: ở gallery bấm *Gửi sang img2img* → trong img2img: *Mức khử nhiễu* **0.25–0.35**, kéo xuống *Script* chọn **Ultimate SD upscale** → *Target size type* = *Scale from image size*, *Scale* = 2, *Upscaler* = 4x-AnimeSharp, *Tile width/height* 1024, *Padding* 32, *Seams fix* = *Half tile offset pass* → *Tạo ảnh*. Có thể bật thêm ControlNet **Tile** (model `noob_sdxl_controlnet_tile` nếu đã tải) để bám sát ảnh gốc hơn.
+
+## ✨ Tự fix (đã bật sẵn, chỉnh ở cell 1)
+- **ADetailer** chạy sau mỗi ảnh: bộ 1 `face_yolov8n.pt` tìm và vẽ lại **mặt**, bộ 2 `hand_yolov8n.pt` vẽ lại **tay** (denoise 0.4). Mặt vẫn lỗi → tăng *Inpaint denoising strength* lên 0.5; ảnh nhiều người → giảm *Detection confidence* 0.3 → 0.25; không muốn sửa tay → chọn `face`.
+- **Hires. fix** như mục trên. Cả hai đều tắt được từng lần bằng cách bỏ tích trong UI; muốn tắt hẳn: `AUTO_HIRES_FIX = False` / `AUTO_ADETAILER = off` ở cell 1 → chạy lại cell 1 → `!python /content/noobai_lib.py settings` (hoặc chạy lại cell 3) → cell 6.
+- Ảnh vẫn lỗi tay: thêm style *Noob ✦ Negative: tay/anatomy*, hoặc ở gallery → *Gửi sang inpaint* → tô vùng tay → *Chỉ vùng tô*, denoise 0.5 → tạo lại vài lần.
+
 ## 🛠 Xử lý sự cố
 | Hiện tượng | Cách xử lý |
 |---|---|
@@ -248,7 +290,13 @@ def embed_locale(lib_src: str) -> str:
     marker = "VI_LOCALE_EMBEDDED: dict | None = None"
     assert marker in lib_src, "không tìm thấy VI_LOCALE_EMBEDDED trong noobai_lib.py"
     literal = json.dumps(data, ensure_ascii=False, indent=1)  # JSON object = dict literal hợp lệ trong Python
-    return lib_src.replace(marker, f"VI_LOCALE_EMBEDDED: dict | None = {literal}", 1)
+    lib_src = lib_src.replace(marker, f"VI_LOCALE_EMBEDDED: dict | None = {literal}", 1)
+    # script noob_tools.py (độ phân giải chuẩn + tự fix)
+    src = NOOB_TOOLS.read_text(encoding="utf-8")
+    compile(src, str(NOOB_TOOLS), "exec")
+    marker2 = "NOOB_TOOLS_EMBEDDED: str | None = None"
+    assert marker2 in lib_src, "không tìm thấy NOOB_TOOLS_EMBEDDED trong noobai_lib.py"
+    return lib_src.replace(marker2, f"NOOB_TOOLS_EMBEDDED: str | None = {src!r}", 1)
 
 
 def build() -> dict:

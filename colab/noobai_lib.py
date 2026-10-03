@@ -30,7 +30,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.1.0"
+LIB_VERSION = "1.2.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -64,6 +64,27 @@ VI_LOCALE_URLS = [
 
 # build_notebook.py sẽ chèn nội dung colab/vi_VN.json vào đây để notebook tự chứa bản dịch (không cần tải thêm)
 VI_LOCALE_EMBEDDED: dict | None = None
+# build_notebook.py sẽ chèn mã nguồn colab/noob_tools.py (script Forge: độ phân giải chuẩn + tự fix) vào đây
+NOOB_TOOLS_EMBEDDED: str | None = None
+NOOB_TOOLS_NAME = "noob_tools.py"
+NOOB_TOOLS_URLS = [
+    f"https://github.com/manhlee1196-boop/anime2/raw/main/colab/{NOOB_TOOLS_NAME}",
+    f"https://raw.githubusercontent.com/manhlee1196-boop/anime2/main/colab/{NOOB_TOOLS_NAME}",
+    f"https://api.github.com/repos/manhlee1196-boop/anime2/contents/colab/{NOOB_TOOLS_NAME}?ref=main",
+]
+
+# Độ phân giải chuẩn (bucket ~1 MP của SDXL / NoobAI-XL) – dùng cho form notebook và script noob_tools
+STANDARD_RESOLUTIONS = {
+    "832x1216 (dọc 2:3 – chuẩn NoobAI)": (832, 1216),
+    "1216x832 (ngang 3:2)": (1216, 832),
+    "1024x1024 (vuông)": (1024, 1024),
+    "896x1152 (dọc 7:9)": (896, 1152),
+    "1152x896 (ngang 9:7)": (1152, 896),
+    "768x1344 (dọc 9:16)": (768, 1344),
+    "1344x768 (ngang 16:9)": (1344, 768),
+    "640x1536 (dọc 5:12)": (640, 1536),
+    "1536x640 (ngang 12:5)": (1536, 640),
+}
 
 HF = "https://huggingface.co"
 
@@ -232,6 +253,11 @@ class Config:
     default_sampler: str = "Euler a"
     default_scheduler: str = "Automatic"
     clip_skip: int = 2
+    # ✨ Tự fix: mở sẵn Hires. fix + ADetailer khi vào UI
+    auto_hires_fix: bool = True
+    hires_upscale_by: float = 1.5
+    hires_denoise: float = 0.4
+    auto_adetailer: str = "face+hand"          # face+hand | face | off
     # Chế độ test (CPU, không GPU) – chỉ dùng khi kiểm thử bộ cài
     test_mode: bool = False
 
@@ -744,6 +770,37 @@ def install_localization(cfg: Config) -> Path | None:
     return None
 
 
+def install_noob_tools(cfg: Config) -> Path | None:
+    """Chép script noob_tools.py (dropdown độ phân giải chuẩn + tự bật Hires fix/ADetailer) vào <forge>/scripts/."""
+    dest = Paths.forge / "scripts" / NOOB_TOOLS_NAME
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    here = Path(__file__).resolve().parent
+    for local in (here / NOOB_TOOLS_NAME, here.parent / "colab" / NOOB_TOOLS_NAME, Path("/content") / NOOB_TOOLS_NAME):
+        if local.exists() and local.stat().st_size > 500:
+            shutil.copy2(local, dest)
+            log(f"✔ NoobAI Tools script: {dest}")
+            return dest
+    if NOOB_TOOLS_EMBEDDED:
+        dest.write_text(NOOB_TOOLS_EMBEDDED, encoding="utf-8")
+        log(f"✔ NoobAI Tools script (nhúng sẵn) → {dest}")
+        return dest
+    if dest.exists():
+        log(f"✔ NoobAI Tools script đã có: {dest.name}")
+        return dest
+    for url in NOOB_TOOLS_URLS:
+        try:
+            download_file(url, dest, cfg)
+            compile(dest.read_text(encoding="utf-8"), str(dest), "exec")
+            log(f"✔ tải NoobAI Tools script từ {url}")
+            return dest
+        except Exception as e:  # noqa: BLE001
+            log(f"không tải được từ {url}: {e}")
+            if dest.exists():
+                dest.unlink()
+    log("⚠ không có noob_tools.py → không có dropdown độ phân giải chuẩn / tự fix")
+    return None
+
+
 def setup_drive(cfg: Config) -> dict:
     """Mount Google Drive (chỉ trong Colab) và liên kết thư mục outputs / models."""
     info = {"mounted": False, "outputs": str(Paths.forge / "outputs")}
@@ -936,15 +993,33 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "customscript/sampler.py/txt2img/Sampling steps/value": cfg.default_steps,
         "customscript/sampler.py/img2img/Sampling steps/value": cfg.default_steps,
         "txt2img/Upscaler/value": "4x-AnimeSharp" if cfg.download_upscalers else "Latent",
-        "txt2img/Upscale by/value": 1.5,
+        "txt2img/Upscale by/value": float(cfg.hires_upscale_by),
         "txt2img/Hires steps/value": 14,
-        "txt2img/Denoising strength/value": 0.4,
+        "txt2img/Denoising strength/value": float(cfg.hires_denoise),
         "txt2img/Batch count/value": 1,
         "txt2img/Batch size/value": 1,
         "img2img/Denoising strength/value": 0.5,
     }
+    # ✨ Tự fix: ADetailer – bộ 1 sửa mặt, bộ 2 sửa tay (model YOLO đã nằm trong gói tải mặc định)
+    ad = str(cfg.auto_adetailer or "off").lower()
+    if ad != "off" and "adetailer" in cfg.extensions:
+        for tab in ("txt2img", "img2img"):
+            ui[f"{tab}/ADetailer detector/value"] = "face_yolov8n.pt"
+            ui[f"{tab}/Detection model confidence threshold/value"] = 0.3
+            ui[f"{tab}/Inpaint denoising strength/value"] = 0.4
+            ui[f"{tab}/Enable this tab (2nd)/value"] = True
+            ui[f"{tab}/ADetailer detector 2nd/value"] = "hand_yolov8n.pt" if ad == "face+hand" else "None"
+            ui[f"{tab}/Detection model confidence threshold 2nd/value"] = 0.3
+            ui[f"{tab}/Inpaint denoising strength 2nd/value"] = 0.4
     _merge_json(Paths.forge / "ui-config.json", ui)
-    log("✔ ui-config.json (prompt / steps / hires mặc định)")
+    log("✔ ui-config.json (prompt / steps / hires / ADetailer mặc định)")
+
+    tools = {
+        "auto_hires_fix": bool(cfg.auto_hires_fix),
+        "auto_adetailer": ad if "adetailer" in cfg.extensions else "off",
+    }
+    (Paths.forge / "noob_tools.json").write_text(json.dumps(tools, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"✔ noob_tools.json (tự fix: hires={tools['auto_hires_fix']}, adetailer={tools['auto_adetailer']})")
 
     styles = [
         ("Noob ✦ Quality (chuẩn)", NOOB_POSITIVE_PREFIX + "{prompt}", NOOB_NEGATIVE),
@@ -1058,6 +1133,16 @@ def self_test(cfg: Config) -> bool:
             except Exception:  # noqa: BLE001
                 ok = False
         check(ok, f"{name}")
+
+    tools_py = Paths.forge / "scripts" / NOOB_TOOLS_NAME
+    tools_ok = tools_py.exists()
+    if tools_ok:
+        try:
+            compile(tools_py.read_text(encoding="utf-8"), str(tools_py), "exec")
+        except Exception:  # noqa: BLE001
+            tools_ok = False
+    check(tools_ok and (Paths.forge / "noob_tools.json").exists(),
+          f"NoobAI Tools (độ phân giải chuẩn + tự fix: hires={cfg.auto_hires_fix}, adetailer={cfg.auto_adetailer})")
 
     if str(cfg.ui_language).lower().startswith("vi"):
         loc = Paths.forge / "localizations" / f"{VI_LOCALE_NAME}.json"
@@ -1317,6 +1402,7 @@ def install(cfg: Config) -> dict:
     prepare_forge_environment(cfg)
     install_tag_csv(cfg)
     install_localization(cfg)
+    install_noob_tools(cfg)
     drive_info = setup_drive(cfg)
     write_settings(cfg, drive_info)
     (ROOT / "noobai_drive.json").write_text(json.dumps(drive_info), encoding="utf-8")
@@ -1349,6 +1435,12 @@ def main(argv: list[str]) -> int:
     step = argv[1] if len(argv) > 1 else "all"
     if step == "lang":
         print("localization =", set_ui_language(cfg, argv[2] if len(argv) > 2 else None))
+        return 0
+    if step == "settings":  # ghi lại config.json / ui-config.json / noob_tools.json theo noobai_config.json hiện tại
+        install_localization(cfg)
+        install_noob_tools(cfg)
+        drive_path = ROOT / "noobai_drive.json"
+        write_settings(cfg, json.loads(drive_path.read_text()) if drive_path.exists() else {})
         return 0
     if step in ("install", "all"):
         install(cfg)
