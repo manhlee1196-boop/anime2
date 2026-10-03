@@ -31,7 +31,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.6.0"
+LIB_VERSION = "1.7.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -183,6 +183,18 @@ ADETAILER_FILES = {
     "person_yolov8n_seg": dict(kind="adetailer", name="person_yolov8n-seg.pt",
                                url=f"{HF}/Bingsu/adetailer/resolve/main/person_yolov8n-seg.pt", size=6777003,
                                sha256="38fc8aaae97cb6e70be4ec44770005b26ed473471362afcda62a0037d7ccf432"),
+    # tay – bản s nhận diện tay anime tốt hơn hẳn bản n
+    "hand_yolov8s": dict(kind="adetailer", name="hand_yolov8s.pt",
+                         url=f"{HF}/Bingsu/adetailer/resolve/main/hand_yolov8s.pt", size=22507643,
+                         sha256="70b540063fbc385736d8258970744a4afbc4cbf7932134bae3b24cdadeadec06"),
+    # mắt anime (segmentation, Anzhc) – dùng cho bộ ADetailer "mắt"
+    "anzhc_eyes_seg": dict(kind="adetailer", name="Anzhc_Eyes_seg_hd.pt",
+                           url=f"{HF}/Anzhc/Anzhcs_YOLOs/resolve/main/Anzhc%20Eyes%20-seg-hd.pt", size=6906493,
+                           sha256="6be1c13ca7a51c2425e278e07e7ae3d4c94ee125b874a0104a142f4f5a35a308"),
+    # mặt anime (segmentation theo đường viền mặt, không lẹm vào tóc) – lựa chọn thay thế
+    "anzhc_face_seg": dict(kind="adetailer", name="Anzhc_Face_seg_1024_v2_y8n.pt",
+                           url=f"{HF}/Anzhc/Anzhcs_YOLOs/resolve/main/Anzhc%20Face%20seg%201024%20v2%20y8n.pt", size=6948693,
+                           sha256="1bbcfd7a9f407c6f6e4389a371dbcc392f9444421cf7f824152e92bf563dc6a3"),
 }
 CONTROLNET_SETS = {
     "none": [],
@@ -203,10 +215,15 @@ EXTENSIONS = {
 }
 
 # Prompt khuyến nghị chính thức của NoobAI-XL (EPS)
-NOOB_POSITIVE_PREFIX = "masterpiece, best quality, newest, absurdres, highres, "
+NOOB_POSITIVE_PREFIX = "masterpiece, best quality, very awa, newest, absurdres, highres, "
 NOOB_NEGATIVE = (
     "worst quality, old, early, low quality, lowres, signature, username, logo, bad hands, "
     "mutated hands, mammal, anthro, furry, ambiguous form, feral, semi-anthro"
+)
+# Negative mặc định trong ô Negative prompt = NoobAI chuẩn + khối anatomy gọn (mắt / tay / chân)
+NOOB_NEGATIVE_FULL = NOOB_NEGATIVE + (
+    ", worst aesthetic, bad anatomy, bad proportions, extra digits, fewer digits, extra fingers, missing fingers, "
+    "fused fingers, bad feet, extra limbs, cross-eyed, uneven eyes"
 )
 
 # Bộ thẻ sửa MẮT / TAY / CHÂN (xem docs/prompt_fix_mat_tay_chan.md)
@@ -231,11 +248,54 @@ FIX_ALL_NEG = (
     "extra digits, fewer digits, extra fingers, missing fingers, fused fingers, malformed hands, extra arms, missing arms, "
     "bad feet, bad legs, extra legs, missing legs, fused toes, extra toes, disconnected limbs, extra limbs"
 )
-# Prompt ADetailer mặc định (bộ 1 = mặt, bộ 2 = tay)
-AD_FACE_PROMPT = "detailed face, beautiful detailed eyes, symmetrical eyes, looking at viewer, eye contact"
-AD_FACE_NEG = "bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres"
-AD_HAND_PROMPT = "detailed hands, five fingers, natural hand pose, fingernails"
-AD_HAND_NEG = "bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers"
+# Prompt ADetailer mặc định. "[PROMPT]" = ADetailer tự chèn prompt/negative chính của ảnh vào vị trí đó
+# → giữ nguyên màu mắt, kiểu tóc, phong cách… rồi mới thêm thẻ của bộ phận.
+AD_FACE_PROMPT = "[PROMPT], detailed face, beautiful detailed eyes, symmetrical eyes, eye contact"
+AD_FACE_NEG = "[PROMPT], bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres"
+AD_EYES_PROMPT = "[PROMPT], detailed eyes, beautiful detailed eyes, eye focus, bright pupils, eye reflection, sparkling eyes"
+AD_EYES_NEG = "[PROMPT], bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra pupils, empty eyes, blurry eyes"
+AD_HAND_PROMPT = "[PROMPT], detailed hands, five fingers, natural hand pose, fingernails"
+AD_HAND_NEG = "[PROMPT], bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers, too many fingers"
+
+# Model ADetailer theo thứ tự ưu tiên (file nào có trong models/adetailer thì dùng)
+AD_FACE_MODELS = ["face_yolov8s.pt", "face_yolov8n.pt", "Anzhc_Face_seg_1024_v2_y8n.pt"]
+AD_EYES_MODELS = ["Anzhc_Eyes_seg_hd.pt", "mediapipe_face_mesh_eyes_only"]
+AD_HAND_MODELS = ["hand_yolov8s.pt", "hand_yolov8n.pt"]
+
+
+def _ad_tab(models, prompt, neg, *, conf=0.3, dilate=4, blur=4, denoise=0.4, pad=32) -> dict:
+    return dict(models=list(models), prompt=prompt, negative=neg, confidence=conf, dilate=dilate,
+                blur=blur, denoise=denoise, padding=pad)
+
+
+_AD_FACE = _ad_tab(AD_FACE_MODELS, AD_FACE_PROMPT, AD_FACE_NEG, conf=0.3, dilate=4, blur=8, denoise=0.4, pad=32)
+_AD_EYES = _ad_tab(AD_EYES_MODELS, AD_EYES_PROMPT, AD_EYES_NEG, conf=0.3, dilate=8, blur=4, denoise=0.35, pad=32)
+_AD_HAND = _ad_tab(AD_HAND_MODELS, AD_HAND_PROMPT, AD_HAND_NEG, conf=0.25, dilate=12, blur=8, denoise=0.5, pad=48)
+
+# Mức tự sửa (ADetailer) – dùng chung cho ui-config.json (mặc định khi mở UI) và dropdown 🩹 trong noob_tools.py.
+# Bộ 1 = mặt, bộ 2 = mắt, bộ 3 = tay. Bộ không có trong danh sách → model "None".
+AD_LEVELS = {
+    "off": dict(label="⛔ Tắt – không tự sửa", enable=False, tabs=[]),
+    "light": dict(label="🪶 Nhẹ – chỉ sửa mặt (nhanh nhất)", enable=True,
+                  tabs=[{**_AD_FACE, "denoise": 0.35}]),
+    "standard": dict(label="✅ Chuẩn – mặt + mắt + tay (khuyên dùng)", enable=True,
+                     tabs=[_AD_FACE, _AD_EYES, _AD_HAND]),
+    "strong": dict(label="🔥 Mạnh – mắt/tay lỗi nặng, vẽ lại nhiều hơn", enable=True,
+                   tabs=[{**_AD_FACE, "denoise": 0.45, "dilate": 8},
+                         {**_AD_EYES, "denoise": 0.45, "dilate": 12},
+                         {**_AD_HAND, "denoise": 0.6, "dilate": 16, "padding": 64, "confidence": 0.2}]),
+    "multi": dict(label="👥 Nhiều người – nhận diện nhạy hơn, sửa mặt + mắt + tay", enable=True,
+                  tabs=[{**_AD_FACE, "confidence": 0.2}, {**_AD_EYES, "confidence": 0.2},
+                        {**_AD_HAND, "confidence": 0.15}]),
+}
+AD_LEVEL_ALIASES = {"face+hand": "standard", "face": "light", "on": "standard", "true": "standard",
+                    "false": "off", "none": "off", "full": "standard"}
+
+
+def ad_level_key(value) -> str:
+    v = str(value or "standard").strip().lower()
+    v = AD_LEVEL_ALIASES.get(v, v)
+    return v if v in AD_LEVELS else "standard"
 
 
 # --------------------------------------------------------------------------------------
@@ -288,7 +348,7 @@ class Config:
     auto_hires_fix: bool = True
     hires_upscale_by: float = 1.5
     hires_denoise: float = 0.4
-    auto_adetailer: str = "face+hand"          # face+hand | face | off
+    auto_adetailer: str = "standard"           # standard | strong | light | multi | off (cũ: face+hand, face)
     # Chế độ test (CPU, không GPU) – chỉ dùng khi kiểm thử bộ cài
     test_mode: bool = False
 
@@ -1003,9 +1063,35 @@ def _merge_json(path: Path, updates: dict) -> None:
     path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
 
 
+def _ordinal(n: int) -> str:
+    return {1: "1st", 2: "2nd", 3: "3rd"}.get(n, f"{n}th")
+
+
+def adetailer_ui_config(level: str, max_tabs: int = 3) -> dict:
+    """Khoá ui-config.json của ADetailer (txt2img + img2img) cho một mức AD_LEVELS.
+    Khoá = <tab>/<label>/value theo nhãn gốc tiếng Anh của ADetailer (bản dịch chỉ đổi hiển thị)."""
+    lv = AD_LEVELS[ad_level_key(level)]
+    ui: dict = {}
+    for tab in ("txt2img", "img2img"):
+        ui[f"customscript/!adetailer.py/{tab}/ADetailer/value"] = bool(lv["enable"])
+        for n in range(1, max_tabs + 1):
+            suf = "" if n == 1 else f" {_ordinal(n)}"
+            t = lv["tabs"][n - 1] if n - 1 < len(lv["tabs"]) else None
+            ui[f"{tab}/Enable this tab ({_ordinal(n)})/value"] = True
+            ui[f"{tab}/ADetailer detector{suf}/value"] = t["models"][0] if t else "None"
+            ui[f"{tab}/ad_prompt{suf}/value"] = t["prompt"] if t else ""
+            ui[f"{tab}/ad_negative_prompt{suf}/value"] = t["negative"] if t else ""
+            ui[f"{tab}/Detection model confidence threshold{suf}/value"] = t["confidence"] if t else 0.3
+            ui[f"{tab}/Mask erosion (-) / dilation (+){suf}/value"] = t["dilate"] if t else 4
+            ui[f"{tab}/Inpaint mask blur{suf}/value"] = t["blur"] if t else 4
+            ui[f"{tab}/Inpaint denoising strength{suf}/value"] = t["denoise"] if t else 0.4
+            ui[f"{tab}/Inpaint only masked padding, pixels{suf}/value"] = t["padding"] if t else 32
+    return ui
+
+
 RECOMMENDED_PARAMS = dict(default_width=832, default_height=1216, default_steps=28, default_cfg=6.0,
                           default_sampler="Euler a", default_scheduler="Automatic", clip_skip=2,
-                          auto_hires_fix=True, hires_upscale_by=1.5, hires_denoise=0.4, auto_adetailer="face+hand")
+                          auto_hires_fix=True, hires_upscale_by=1.5, hires_denoise=0.4, auto_adetailer="standard")
 
 
 def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
@@ -1013,7 +1099,7 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
     if str(cfg.param_mode).lower().startswith("rec"):
         for k, v in RECOMMENDED_PARAMS.items():
             setattr(cfg, k, v)
-        log("thông số: bộ KHUYÊN DÙNG NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires ×1.5/0.4 · ADetailer mặt+tay)")
+        log("thông số: bộ KHUYÊN DÙNG NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires ×1.5/0.4 · ADetailer mặt+mắt+tay)")
     else:
         log(f"thông số: TỰ CHỈNH ({cfg.default_sampler} · {cfg.default_steps} steps · CFG {cfg.default_cfg} · "
             f"{cfg.default_width}×{cfg.default_height} · Hires {'on' if cfg.auto_hires_fix else 'off'} · ADetailer {cfg.auto_adetailer})")
@@ -1087,18 +1173,20 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "tac_useLycos": True,
         "tac_extra.extraFile": "extra-quality-tags.csv",
         "tac_chantFile": "noob_characters-chants.json",
-        # ADetailer mặc định
-        "ad_max_models": 2,
+        # ADetailer mặc định: 3 bộ (mặt / mắt / tay); vùng inpaint khớp bucket SDXL theo tỉ lệ bbox (nét hơn)
+        "ad_max_models": 3,
         "ad_save_previews": False,
+        "ad_match_inpaint_bbox_size": "Strict (SDXL only)",
+        "ad_same_seed_for_each_tab": False,
     }
     _merge_json(Paths.forge / "config.json", settings)
     log(f"✔ config.json (ngôn ngữ giao diện: {settings['localization']})")
 
     ui = {
         "txt2img/Prompt/value": NOOB_POSITIVE_PREFIX,
-        "txt2img/Negative prompt/value": NOOB_NEGATIVE,
+        "txt2img/Negative prompt/value": NOOB_NEGATIVE_FULL,
         "img2img/Prompt/value": NOOB_POSITIVE_PREFIX,
-        "img2img/Negative prompt/value": NOOB_NEGATIVE,
+        "img2img/Negative prompt/value": NOOB_NEGATIVE_FULL,
         "customscript/sampler.py/txt2img/Sampling steps/value": cfg.default_steps,
         "customscript/sampler.py/img2img/Sampling steps/value": cfg.default_steps,
         "txt2img/Upscaler/value": "4x-AnimeSharp" if cfg.download_upscalers else "Latent",
@@ -1109,29 +1197,18 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "txt2img/Batch size/value": 1,
         "img2img/Denoising strength/value": 0.5,
     }
-    # ✨ Tự fix: ADetailer – bộ 1 sửa mặt, bộ 2 sửa tay (model YOLO đã nằm trong gói tải mặc định)
-    ad = str(cfg.auto_adetailer or "off").lower()
-    if ad != "off" and "adetailer" in cfg.extensions:
-        for tab in ("txt2img", "img2img"):
-            ui[f"{tab}/ADetailer detector/value"] = "face_yolov8n.pt"
-            ui[f"{tab}/Detection model confidence threshold/value"] = 0.3
-            ui[f"{tab}/Inpaint denoising strength/value"] = 0.4
-            ui[f"{tab}/Enable this tab (2nd)/value"] = True
-            ui[f"{tab}/ADetailer detector 2nd/value"] = "hand_yolov8n.pt" if ad == "face+hand" else "None"
-            ui[f"{tab}/Detection model confidence threshold 2nd/value"] = 0.3
-            ui[f"{tab}/Inpaint denoising strength 2nd/value"] = 0.4
-            # prompt sửa mặt/mắt (bộ 1) và tay (bộ 2); ghi cả 2 dạng khoá để chắc chắn khớp ui-config của Forge
-            for prefix in ("", "customscript/!adetailer.py/"):
-                ui[f"{prefix}{tab}/ad_prompt/value"] = AD_FACE_PROMPT
-                ui[f"{prefix}{tab}/ad_negative_prompt/value"] = AD_FACE_NEG
-                ui[f"{prefix}{tab}/ad_prompt 2nd/value"] = AD_HAND_PROMPT
-                ui[f"{prefix}{tab}/ad_negative_prompt 2nd/value"] = AD_HAND_NEG
+    # ✨ Tự fix: ADetailer – bộ 1 mặt, bộ 2 mắt, bộ 3 tay theo mức AD_LEVELS (dropdown 🩹 trong UI đổi được)
+    ad = ad_level_key(cfg.auto_adetailer) if "adetailer" in cfg.extensions else "off"
+    if "adetailer" in cfg.extensions:
+        ui.update(adetailer_ui_config(ad))
     _merge_json(Paths.forge / "ui-config.json", ui)
-    log("✔ ui-config.json (prompt / steps / hires / ADetailer mặc định + prompt sửa mặt, tay)")
+    log(f"✔ ui-config.json (prompt / steps / hires / ADetailer mức '{ad}': {AD_LEVELS[ad]['label']})")
 
     tools = {
         "auto_hires_fix": bool(cfg.auto_hires_fix),
-        "auto_adetailer": ad if "adetailer" in cfg.extensions else "off",
+        "auto_adetailer": ad,
+        "fix_level": ad,
+        "ad_levels": AD_LEVELS,
         "param_mode": "recommended" if str(cfg.param_mode).lower().startswith("rec") else "custom",
     }
     (Paths.forge / "noob_tools.json").write_text(json.dumps(tools, ensure_ascii=False, indent=2), encoding="utf-8")

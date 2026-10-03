@@ -9,9 +9,13 @@ Tính năng:
   3. ⚙️ Dropdown "Thông số khuyên dùng / tự chỉnh" phía trên Sampling method: một cú chọn đặt toàn bộ
      sampler, scheduler, steps, CFG, kích thước, batch, Hires fix (bật/tắt, upscaler, ×, steps, denoise, CFG);
      sửa tay bất kỳ thông số nào → tự chuyển sang "Tuỳ chỉnh".
+  4. 🩹 Dropdown "Tự sửa mặt / mắt / tay (ADetailer)": mức Tắt / Nhẹ / Chuẩn / Mạnh / Nhiều người – đặt model,
+     prompt, confidence, dilation, blur, denoise, padding cho 3 bộ ADetailer (mặt, mắt, tay) trong một cú chọn.
+     Bảng mức lấy từ noob_tools.json ("ad_levels", do noobai_lib.AD_LEVELS ghi); có bảng dự phòng trong file này.
 """
 import json
 import os
+import re
 
 import gradio as gr
 
@@ -74,6 +78,53 @@ IMG2IMG_PRESETS = {
     CUSTOM_P: None,
 }
 
+# ---------------------------------------------------------------- 🩹 ADetailer
+AD_CUSTOM = "✏️ Tuỳ chỉnh (tự đặt trong mục ADetailer)"
+_AD_P = "[PROMPT], "
+_AD_FACE = dict(models=["face_yolov8s.pt", "face_yolov8n.pt"],
+                prompt=_AD_P + "detailed face, beautiful detailed eyes, symmetrical eyes, eye contact",
+                negative=_AD_P + "bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres",
+                confidence=0.3, dilate=4, blur=8, denoise=0.4, padding=32)
+_AD_EYES = dict(models=["Anzhc_Eyes_seg_hd.pt", "mediapipe_face_mesh_eyes_only"],
+                prompt=_AD_P + "detailed eyes, beautiful detailed eyes, eye focus, bright pupils, eye reflection, sparkling eyes",
+                negative=_AD_P + "bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra pupils, empty eyes, blurry eyes",
+                confidence=0.3, dilate=8, blur=4, denoise=0.35, padding=32)
+_AD_HAND = dict(models=["hand_yolov8s.pt", "hand_yolov8n.pt"],
+                prompt=_AD_P + "detailed hands, five fingers, natural hand pose, fingernails",
+                negative=_AD_P + "bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers, too many fingers",
+                confidence=0.25, dilate=12, blur=8, denoise=0.5, padding=48)
+AD_LEVELS_FALLBACK = {
+    "off": dict(label="⛔ Tắt – không tự sửa", enable=False, tabs=[]),
+    "light": dict(label="🪶 Nhẹ – chỉ sửa mặt (nhanh nhất)", enable=True, tabs=[{**_AD_FACE, "denoise": 0.35}]),
+    "standard": dict(label="✅ Chuẩn – mặt + mắt + tay (khuyên dùng)", enable=True, tabs=[_AD_FACE, _AD_EYES, _AD_HAND]),
+    "strong": dict(label="🔥 Mạnh – mắt/tay lỗi nặng, vẽ lại nhiều hơn", enable=True,
+                   tabs=[{**_AD_FACE, "denoise": 0.45, "dilate": 8}, {**_AD_EYES, "denoise": 0.45, "dilate": 12},
+                         {**_AD_HAND, "denoise": 0.6, "dilate": 16, "padding": 64, "confidence": 0.2}]),
+    "multi": dict(label="👥 Nhiều người – nhận diện nhạy hơn, sửa mặt + mắt + tay", enable=True,
+                  tabs=[{**_AD_FACE, "confidence": 0.2}, {**_AD_EYES, "confidence": 0.2}, {**_AD_HAND, "confidence": 0.15}]),
+}
+# khoá trong tab preset → hậu tố elem_id của ADetailer (script_<tab>_adetailer_<id>[_2nd|_3rd])
+AD_FIELD_IDS = {
+    "enable_tab": "ad_tab_enable", "model": "ad_model", "prompt": "ad_prompt", "negative": "ad_negative_prompt",
+    "confidence": "ad_confidence", "dilate": "ad_dilate_erode", "blur": "ad_mask_blur",
+    "denoise": "ad_denoising_strength", "padding": "ad_inpaint_only_masked_padding",
+}
+_AD_ID_RE = re.compile(r"^script_(txt2img|img2img)_adetailer_(ad_[a-z_]+?)(?:_(\d+)(?:st|nd|rd|th))?$")
+_AD_DEFAULT_TAB = dict(models=["None"], prompt="", negative="", confidence=0.3, dilate=4, blur=4, denoise=0.4, padding=32)
+
+
+def _ad_summary(level: dict | None) -> str:
+    if not level:
+        return "<div style='font-size:0.85em;opacity:0.8'>Tự chỉnh trong mục <b>ADetailer</b> bên dưới. Chọn lại một mức để khôi phục.</div>"
+    if not level.get("enable"):
+        return "<div style='font-size:0.85em;opacity:0.8'>ADetailer tắt – ảnh không được tự vẽ lại mặt/mắt/tay.</div>"
+    names = ["mặt", "mắt", "tay"]
+    parts = []
+    for i, t in enumerate(level.get("tabs", [])[:3]):
+        parts.append(f"bộ {i + 1} {names[i] if i < 3 else ''}: {t['models'][0]} · denoise {t['denoise']:g} · conf {t['confidence']:g}")
+    return "<div style='font-size:0.85em;opacity:0.8'>Đã đặt: " + " | ".join(parts) + "</div>"
+
+
 # elem_id của các thông số theo tab → khoá trong preset
 PARAM_IDS = {
     "sampler": "{tab}_sampling", "scheduler": "{tab}_scheduler", "steps": "{tab}_steps", "cfg": "{tab}_cfg_scale",
@@ -117,12 +168,21 @@ def _summary(preset: dict | None, tab: str) -> str:
 
 
 def load_tool_config() -> dict:
-    cfg = {"auto_hires_fix": True, "auto_adetailer": "face+hand", "param_mode": "recommended"}
+    cfg = {"auto_hires_fix": True, "auto_adetailer": "standard", "fix_level": None, "param_mode": "recommended",
+           "ad_levels": None}
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             cfg.update(json.load(f))
     except Exception:  # noqa: BLE001
         pass
+    if not isinstance(cfg.get("ad_levels"), dict) or not cfg["ad_levels"]:
+        cfg["ad_levels"] = AD_LEVELS_FALLBACK
+    if not cfg.get("fix_level"):
+        legacy = str(cfg.get("auto_adetailer", "standard")).lower()
+        cfg["fix_level"] = {"face+hand": "standard", "face": "light", "off": "off"}.get(legacy, legacy)
+    if cfg["fix_level"] not in cfg["ad_levels"]:
+        cfg["fix_level"] = "standard" if "standard" in cfg["ad_levels"] else next(iter(cfg["ad_levels"]))
+    cfg["auto_adetailer"] = cfg["fix_level"]
     return cfg
 
 
@@ -169,6 +229,11 @@ class NoobTools(scripts.Script):
         self.params = {"txt2img": {}, "img2img": {}}   # tab -> khoá preset -> component
         self.preset_dd = {}
         self.preset_hint = {}
+        # 🩹 ADetailer: tab -> {"enable": checkbox, "tabs": {1: {field: component}, 2: {...}, 3: {...}}}
+        self.ad = {"txt2img": {"enable": None, "tabs": {}}, "img2img": {"enable": None, "tabs": {}}}
+        self.ad_dd = {}
+        self.ad_hint = {}
+        self.ad_wired = set()
 
     def title(self):
         return "NoobAI Tools (độ phân giải chuẩn + tự fix)"
@@ -211,11 +276,29 @@ class NoobTools(scripts.Script):
             self._open_accordion(component)
         if self.cfg.get("auto_hires_fix") and elem_id == "txt2img_hr-checkbox":
             self._check(component)
-        if self.cfg.get("auto_adetailer", "off") != "off":
-            if elem_id.endswith("adetailer_ad_main_accordion"):
-                self._open_accordion(component)
-            if elem_id.endswith("adetailer_ad_main_accordion-checkbox"):
+        ad_on = self.cfg.get("fix_level", "off") != "off"
+        if elem_id.endswith("adetailer_ad_main_accordion") and ad_on:
+            self._open_accordion(component)
+        if elem_id.endswith("adetailer_ad_main_accordion-checkbox"):
+            if ad_on:
                 self._check(component)
+            for tab in ("txt2img", "img2img"):
+                if elem_id.startswith(f"script_{tab}_"):
+                    self.ad[tab]["enable"] = component
+
+        # 🩹 gom các thông số ADetailer (3 bộ) để dropdown đặt một lượt
+        m = _AD_ID_RE.match(elem_id)
+        if m:
+            tab, field, idx = m.group(1), m.group(2), int(m.group(3) or 1)
+            self.ad[tab]["tabs"].setdefault(idx, {})[field] = component
+
+        # gallery được tạo SAU toàn bộ script (kể cả ADetailer) → lúc này mới nối dropdown 🩹
+        if elem_id in ("txt2img_gallery", "img2img_gallery"):
+            tab = elem_id.split("_")[0]
+            try:
+                self._wire_adetailer(tab)
+            except Exception as e:  # noqa: BLE001
+                print(f"[NoobAI Tools] không nối được mức sửa lỗi ADetailer ({tab}): {e}")
 
     @staticmethod
     def _open_accordion(acc):
@@ -274,6 +357,77 @@ class NoobTools(scripts.Script):
             hint.do_not_save_to_config = True
         self.preset_dd[tab] = dd
         self.preset_hint[tab] = hint
+
+        # 🩹 mức tự sửa mặt / mắt / tay (ADetailer)
+        levels = self.cfg["ad_levels"]
+        labels = [lv["label"] for lv in levels.values()] + [AD_CUSTOM]
+        cur_key = self.cfg.get("fix_level", "standard")
+        cur = levels[cur_key]["label"] if cur_key in levels else AD_CUSTOM
+        with gr.Row(elem_id=f"{tab}_noob_fix_row"):
+            add = gr.Dropdown(label="🩹 Tự sửa mặt / mắt / tay sau khi tạo ảnh (ADetailer)",
+                              choices=labels, value=cur, elem_id=f"{tab}_noob_fix_level", interactive=True, scale=3)
+            add.do_not_save_to_config = True
+            ahint = gr.HTML(value=_ad_summary(levels.get(cur_key)), elem_id=f"{tab}_noob_fix_hint")
+            ahint.do_not_save_to_config = True
+        self.ad_dd[tab] = add
+        self.ad_hint[tab] = ahint
+
+    def _wire_adetailer(self, tab: str):
+        if tab in self.ad_wired:
+            return
+        dd, hint = self.ad_dd.get(tab), self.ad_hint.get(tab)
+        info = self.ad.get(tab) or {}
+        enable, tabs = info.get("enable"), info.get("tabs") or {}
+        if dd is None or not tabs:
+            if dd is not None:
+                hint.value = "<div style='font-size:0.85em;opacity:0.8'>Không tìm thấy ADetailer – mức sửa lỗi không hoạt động.</div>"
+            return
+        self.ad_wired.add(tab)
+        levels = self.cfg["ad_levels"]
+        by_label = {lv["label"]: lv for lv in levels.values()}
+
+        outputs, slots = [], []       # slots: (n, field) tương ứng từng output; n=0 → checkbox bật ADetailer
+        if enable is not None:
+            outputs.append(enable)
+            slots.append((0, "enable"))
+        for n in sorted(tabs):
+            for key, fid in AD_FIELD_IDS.items():
+                comp = tabs[n].get(fid)
+                if comp is not None:
+                    outputs.append(comp)
+                    slots.append((n, key))
+
+        def apply(label):
+            lv = by_label.get(label)
+            if lv is None:
+                return [gr.update() for _ in outputs] + [_ad_summary(None)]
+            updates = []
+            for n, key in slots:
+                if n == 0:
+                    updates.append(gr.update(value=bool(lv["enable"])))
+                    continue
+                t = lv["tabs"][n - 1] if n - 1 < len(lv["tabs"]) else _AD_DEFAULT_TAB
+                if key == "enable_tab":
+                    updates.append(gr.update(value=True))
+                elif key == "model":
+                    comp = tabs[n][AD_FIELD_IDS["model"]]
+                    choices = _choices(comp)
+                    val = next((mdl for mdl in t["models"] if not choices or mdl in choices), "None")
+                    updates.append(gr.update(value=val))
+                else:
+                    updates.append(gr.update(value=t[key]))
+            return updates + [_ad_summary(lv)]
+
+        dd.input(fn=apply, inputs=[dd], outputs=outputs + [hint], show_progress=False)
+
+        def to_custom():
+            return gr.update(value=AD_CUSTOM), _ad_summary(None)
+
+        for comp in outputs:
+            try:
+                comp.input(fn=to_custom, inputs=[], outputs=[dd, hint], show_progress=False)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _wire_presets(self, tab: str):
         dd, hint = self.preset_dd.get(tab), self.preset_hint.get(tab)

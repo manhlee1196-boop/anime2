@@ -30,7 +30,7 @@ deformed eyes, misaligned eyes, blurry eyes, extra pupils, no pupils, heterochro
 (bỏ `heterochromia` nếu nhân vật có 2 màu mắt; bỏ `empty eyes` nếu muốn phong cách mắt trống.)
 
 ### Mẹo
-- Lỗi mắt lác / lệch: thêm `looking at viewer, eye contact` + giảm CFG xuống 5–6 + ADetailer `face_yolov8n.pt` (mặc định đã bật).
+- Lỗi mắt lác / lệch: thêm `looking at viewer, eye contact` + giảm CFG xuống 5–6; bộ cài đã bật ADetailer bộ 1 mặt `face_yolov8s.pt` + bộ 2 mắt `Anzhc_Eyes_seg_hd.pt` (dropdown 🩹 – chọn **Mạnh** nếu vẫn lỗi).
 - Mắt mờ ở ảnh toàn thân: bật Hires fix (mặc định) hoặc **Gửi sang inpaint** → tô 2 mắt → *Chỉ vùng tô*, denoise 0.35–0.45, prompt chỉ cần `detailed eyes, <màu> eyes, looking at viewer`.
 
 ---
@@ -55,7 +55,7 @@ bad arms, disconnected limbs, floating limbs, twisted hands, claw
 
 ### Mẹo
 - Tay ít ngón / thừa ngón: **tư thế tay cụ thể** (bảng trên) có tác dụng hơn mọi negative. Tránh để tay "tự do" trong prompt.
-- ADetailer bộ 2 `hand_yolov8n.pt` (mặc định đã bật) vẽ lại tay; nếu vẫn lỗi: tăng *Inpaint denoising* 0.5 → 0.6, hoặc inpaint thủ công vùng tay với prompt `detailed hands, five fingers, <tư thế>`.
+- ADetailer bộ 3 `hand_yolov8s.pt` (mặc định đã bật, denoise 0.5, dilation 12, padding 48) vẽ lại tay; nếu vẫn lỗi: dropdown 🩹 → **Mạnh** (denoise 0.6, conf 0.2), hoặc inpaint thủ công vùng tay với prompt `detailed hands, five fingers, <tư thế>`.
 - Tay cầm đồ, tay sau lưng, tay trong túi = ba cách "né" rẻ nhất khi ảnh không cần tay.
 
 ---
@@ -108,17 +108,17 @@ worst quality, low quality, lowres, bad anatomy, bad hands, bad feet, extra digi
 
 ---
 
-## 5. 🤖 Prompt cho ADetailer (đã đặt sẵn trong bộ cài)
+## 5. 🤖 ADetailer trong bộ cài (dropdown 🩹 – 3 bộ: mặt / mắt / tay)
 
-| Bộ | Model | Prompt | Negative |
-|---|---|---|---|
-| 1 – Mặt | `face_yolov8n.pt` | `detailed face, beautiful detailed eyes, symmetrical eyes, looking at viewer, eye contact` | `bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres` |
-| 2 – Tay | `hand_yolov8n.pt` | `detailed hands, five fingers, natural hand pose, fingernails` | `bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers` |
+`[PROMPT]` = ADetailer tự chèn prompt (hoặc negative) chính của ảnh vào vị trí đó → giữ nguyên màu mắt, tóc, phong cách rồi mới thêm thẻ bộ phận.
 
-Prompt ADetailer **không** chứa mô tả nhân vật (màu tóc, trang phục…) – ADetailer tự nối với prompt chính nếu để trống;
-ở đây ta chỉ thêm phần mô tả bộ phận. Muốn giữ màu mắt chính xác: thêm `<màu> eyes` vào prompt bộ 1.
+| Bộ | Model | Prompt | Negative | Chuẩn | Mạnh |
+|---|---|---|---|---|---|
+| 1 – Mặt | `face_yolov8s.pt` | `[PROMPT], detailed face, beautiful detailed eyes, symmetrical eyes, eye contact` | `[PROMPT], bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres` | denoise 0.4 · conf 0.3 · dilation 4 · blur 8 | denoise 0.45 · dilation 8 |
+| 2 – Mắt | `Anzhc_Eyes_seg_hd.pt` (YOLO seg mắt anime) | `[PROMPT], detailed eyes, beautiful detailed eyes, eye focus, bright pupils, eye reflection, sparkling eyes` | `[PROMPT], bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra pupils, empty eyes, blurry eyes` | denoise 0.35 · conf 0.3 · dilation 8 | denoise 0.45 · dilation 12 |
+| 3 – Tay | `hand_yolov8s.pt` | `[PROMPT], detailed hands, five fingers, natural hand pose, fingernails` | `[PROMPT], bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers, too many fingers` | denoise 0.5 · conf 0.25 · dilation 12 · padding 48 | denoise 0.6 · conf 0.2 · dilation 16 · padding 64 |
 
----
+Mức **Nhẹ** = chỉ bộ 1 (denoise 0.35); **Nhiều người** = 3 bộ với confidence 0.2 / 0.2 / 0.15. Tuỳ chọn `ad_match_inpaint_bbox_size = Strict (SDXL only)` đã bật: vùng cắt được vẽ lại ở bucket SDXL gần tỉ lệ bbox nhất (tay vuông → 1024×1024) thay vì kéo méo theo khung ảnh.
 
 ## 6. 🔧 Quy trình sửa khi vẫn lỗi
 1. **Tư thế cụ thể** cho tay/chân trong prompt (mục 2, 3) → giảm 70 % lỗi.

@@ -90,7 +90,7 @@ EXTRA_ARGS = ""  #@param {type:"string"}
 FORGE_COMMIT = "dfdcbab685e57677014f05a3309b48cc87383167"  #@param {type:"string"}
 
 #@markdown ### 🎛 Thông số tạo ảnh
-#@markdown **Khuyên dùng** = bộ chuẩn NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires fix ×1.5/0.4 · ADetailer mặt+tay) – các ô bên dưới sẽ bị bỏ qua. **Tự chỉnh** = dùng các ô bên dưới. Trong UI vẫn đổi được bằng dropdown ⚙️ phía trên Sampling method.
+#@markdown **Khuyên dùng** = bộ chuẩn NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires fix ×1.5/0.4 · ADetailer mặt+mắt+tay) – các ô bên dưới sẽ bị bỏ qua. **Tự chỉnh** = dùng các ô bên dưới. Trong UI vẫn đổi được bằng dropdown ⚙️ phía trên Sampling method.
 PARAM_MODE = "Khuyên dùng (NoobAI chuẩn)"  #@param ["Khuyên dùng (NoobAI chuẩn)", "Tự chỉnh (dùng các ô bên dưới)"]
 #@markdown Độ phân giải chuẩn (bucket ~1 MP mà NoobAI-XL được huấn luyện). Trong UI vẫn đổi được bằng dropdown 📐 dưới Width/Height.
 DEFAULT_RESOLUTION = "832x1216 (dọc 2:3 – chuẩn NoobAI)"  #@param ["832x1216 (dọc 2:3 – chuẩn NoobAI)", "1216x832 (ngang 3:2)", "1024x1024 (vuông)", "896x1152 (dọc 7:9)", "1152x896 (ngang 9:7)", "768x1344 (dọc 9:16)", "1344x768 (ngang 16:9)", "640x1536 (dọc 5:12)", "1536x640 (ngang 12:5)"]
@@ -107,8 +107,8 @@ CLIP_SKIP = 2  #@param {type:"integer"}
 AUTO_HIRES_FIX = True  #@param {type:"boolean"}
 HIRES_UPSCALE_BY = 1.5  #@param [1.25, 1.5, 1.75, 2.0] {type:"raw"}
 HIRES_DENOISE = 0.4  #@param {type:"number"}
-#@markdown ADetailer: tự phát hiện và vẽ lại mặt (bộ 1) và tay (bộ 2) sau khi tạo ảnh
-AUTO_ADETAILER = "face+hand"  #@param ["face+hand", "face", "off"]
+#@markdown ADetailer – mức tự sửa sau khi tạo ảnh: **standard** = 3 bộ mặt + mắt + tay (khuyên dùng) · **strong** = mắt/tay lỗi nặng (denoise cao hơn, vùng rộng hơn) · **light** = chỉ mặt (nhanh) · **multi** = ảnh nhiều người (nhận diện nhạy) · **off**. Trong UI đổi được bằng dropdown 🩹.
+AUTO_ADETAILER = "standard"  #@param ["standard", "strong", "light", "multi", "off"]
 
 import json, os, re
 _res = CUSTOM_RESOLUTION.strip() or DEFAULT_RESOLUTION
@@ -290,7 +290,7 @@ worst quality, old, early, low quality, lowres, signature, username, logo, bad h
 - Sampler **Euler a**, 24–32 steps, **CFG 5–7**, Clip skip 2, kích thước ≈ 1 MP (832×1216, 1024×1024, 1216×832…).
 - Nhân vật: gõ tên theo Danbooru, ví dụ `hatsune_miku, vocaloid` – Tag Autocomplete sẽ gợi ý từ **349 714 tag** của repo (gõ `_` hoặc chữ cái đầu, Tab để chọn).
 - Phong cách hoạ sĩ: `artist:xxx` hoặc chỉ tên hoạ sĩ theo Danbooru. Năm: `newest / recent / mid / early / old`.
-- Hires fix: 4x-AnimeSharp × 1.5, denoise 0.35–0.45 (đã đặt mặc định). ADetailer: bật `face_yolov8n.pt` để sửa mặt.
+- Hires fix: 4x-AnimeSharp × 1.5, denoise 0.35–0.45 (đã đặt mặc định). ADetailer 3 bộ mặt + mắt + tay đã bật sẵn (dropdown 🩹).
 - ControlNet Union ProMax: chọn model `xinsir_controlnet_union_sdxl_promax`, chọn preprocessor tương ứng (canny/depth/openpose/lineart/tile…).
 
 ## ⚙️ Thông số khuyên dùng hay tự chỉnh?
@@ -330,11 +330,22 @@ Trong UI: dropdown **📐 Độ phân giải chuẩn** nằm ngay dưới Width/
 2. **Extras – phóng to ảnh có sẵn, không vẽ lại (vài giây)**: tab *Công cụ thêm (Extras)* → kéo ảnh vào → *Upscaler 1* = `4x-AnimeSharp` (anime) hoặc `4x-UltraSharp` (chi tiết/thực), *Phóng to gấp* 2–4 → *Tạo ảnh*. Nhanh, giữ nguyên nội dung, nhưng không thêm chi tiết mới.
 3. **Ultimate SD Upscale – phóng to + vẽ lại chi tiết theo ô (kỹ nhất, 4K được)**: ở gallery bấm *Gửi sang img2img* → trong img2img: *Mức khử nhiễu* **0.25–0.35**, kéo xuống *Script* chọn **Ultimate SD upscale** → *Target size type* = *Scale from image size*, *Scale* = 2, *Upscaler* = 4x-AnimeSharp, *Tile width/height* 1024, *Padding* 32, *Seams fix* = *Half tile offset pass* → *Tạo ảnh*. Có thể bật thêm ControlNet **Tile** (model `noob_sdxl_controlnet_tile` nếu đã tải) để bám sát ảnh gốc hơn.
 
-## ✨ Tự fix (đã bật sẵn, chỉnh ở cell 1)
-- **ADetailer** chạy sau mỗi ảnh: bộ 1 `face_yolov8n.pt` tìm và vẽ lại **mặt**, bộ 2 `hand_yolov8n.pt` vẽ lại **tay** (denoise 0.4). Mặt vẫn lỗi → tăng *Inpaint denoising strength* lên 0.5; ảnh nhiều người → giảm *Detection confidence* 0.3 → 0.25; không muốn sửa tay → chọn `face`.
-- **Hires. fix** như mục trên. Cả hai đều tắt được từng lần bằng cách bỏ tích trong UI; muốn tắt hẳn: `AUTO_HIRES_FIX = False` / `AUTO_ADETAILER = off` ở cell 1 → chạy lại cell 1 → `!python /content/noobai_lib.py settings` (hoặc chạy lại cell 3) → cell 6.
-- ADetailer đã có sẵn prompt riêng: bộ 1 (mặt) `detailed face, beautiful detailed eyes, symmetrical eyes, looking at viewer, eye contact`; bộ 2 (tay) `detailed hands, five fingers, natural hand pose, fingernails` + negative tương ứng (sửa được trong mục ADetailer của UI).
-- Ảnh vẫn lỗi tay: thêm style *Noob ✦ Fix tay*, hoặc ở gallery → *Gửi sang inpaint* → tô vùng tay → *Chỉ vùng tô*, denoise 0.5 → tạo lại vài lần.
+## ✨ Tự fix (đã bật sẵn, chỉnh ở cell 1 hoặc dropdown 🩹 trong UI)
+- Dropdown **🩹 Tự sửa mặt / mắt / tay (ADetailer)** nằm ngay dưới ⚙️ Thông số tạo ảnh. Một cú chọn đặt model, prompt, confidence, dilation, blur, denoise, padding cho **3 bộ ADetailer**:
+
+| Mức | Bộ 1 – mặt | Bộ 2 – mắt | Bộ 3 – tay |
+|---|---|---|---|
+| ✅ **Chuẩn** (mặc định) | `face_yolov8s` · denoise 0.4 · conf 0.3 | `Anzhc_Eyes_seg_hd` (YOLO mắt anime) · denoise 0.35 · dilation 8 | `hand_yolov8s` · denoise **0.5** · conf 0.25 · dilation 12 · padding 48 |
+| 🔥 **Mạnh** | denoise 0.45 · dilation 8 | denoise 0.45 · dilation 12 | denoise **0.6** · conf 0.2 · dilation 16 · padding 64 |
+| 🪶 Nhẹ | denoise 0.35 | – | – |
+| 👥 Nhiều người | conf 0.2 | conf 0.2 | conf 0.15 · denoise 0.5 |
+| ⛔ Tắt | – | – | – |
+
+- Prompt mỗi bộ bắt đầu bằng `[PROMPT]` = ADetailer tự chèn prompt/negative chính của ảnh (giữ màu mắt, kiểu tóc, phong cách) rồi mới thêm thẻ bộ phận (`detailed eyes, bright pupils…`, `detailed hands, five fingers…`). Sửa được trong mục *ADetailer* của UI – sửa tay là dropdown tự chuyển sang *Tuỳ chỉnh*.
+- Vùng inpaint của ADetailer được khớp với bucket SDXL theo tỉ lệ bbox (*ad_match_inpaint_bbox_size = Strict*) → tay/mắt được vẽ lại ở ~1024 px thay vì bị kéo méo theo khung ảnh.
+- **Vì sao trước đây sửa không ăn?** Bộ cũ dùng `hand_yolov8n` (hay bỏ sót tay anime) và denoise 0.4 cho tay – quá thấp để đổi số ngón; mắt không có bộ riêng nên chỉ được vẽ lại chung với mặt ở độ phân giải thấp. Mức **Chuẩn** mới dùng model `s` + denoise 0.5 cho tay và bộ mắt riêng; vẫn chưa đủ → chọn **🔥 Mạnh**, hoặc *Gửi sang inpaint* → tô tay/mắt → *Chỉ vùng tô*, denoise 0.5–0.6, batch count 4 rồi chọn ảnh đẹp nhất.
+- **Hires. fix** như mục trên. Cả hai đều tắt được từng lần trong UI; muốn tắt hẳn: `AUTO_HIRES_FIX = False` / `AUTO_ADETAILER = off` ở cell 1 → chạy lại cell 1 → `!python /content/noobai_lib.py settings` (hoặc chạy lại cell 3) → cell 6.
+- Ô Negative prompt mặc định giờ là NoobAI chuẩn **+ khối anatomy gọn** (`bad anatomy, bad proportions, extra digits, fewer digits, extra fingers, missing fingers, fused fingers, bad feet, extra limbs, cross-eyed, uneven eyes, worst aesthetic`); prompt mặc định thêm `very awa` (thẻ thẩm mỹ top 5 % của NoobAI).
 
 ## 🩹 Thẻ sửa MẮT – TAY – CHÂN (Styles có sẵn)
 Chọn ở ô **Styles** (cạnh nút Tạo ảnh), có thể chọn nhiều style cùng lúc. Bảng đầy đủ + mẹo inpaint: [docs/prompt_fix_mat_tay_chan.md](https://github.com/manhlee1196-boop/anime2/blob/main/docs/prompt_fix_mat_tay_chan.md).

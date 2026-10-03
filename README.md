@@ -18,7 +18,7 @@ trên nền **Stable Diffusion WebUI Forge**, chia sẻ giao diện qua **gradio
 | Drive | Lưu ảnh ra Drive; liên kết `MyDrive/NoobAI/{models,Lora,embeddings,VAE,ControlNet}` |
 | Thông số | Dropdown **⚙️ Thông số tạo ảnh** trên Sampling method: 5 bộ khuyên dùng (chuẩn / nháp nhanh / chất lượng cao / sáng tạo / chính xác) đặt toàn bộ sampler·steps·CFG·kích thước·Hires fix, hoặc *Tuỳ chỉnh* (tự chuyển khi sửa tay); cell 1 `PARAM_MODE` |
 | Độ phân giải | Dropdown **📐 Độ phân giải chuẩn** (9 bucket ~1 MP của SDXL/NoobAI) ngay dưới Width/Height; mặc định 832×1216 |
-| Tự fix | **Hires. fix** (4x-AnimeSharp ×1.5, denoise 0.4) và **ADetailer** (mặt `face_yolov8n` + tay `hand_yolov8n`) mở sẵn khi vào UI – `AUTO_HIRES_FIX` / `AUTO_ADETAILER` ở cell 1 |
+| Tự fix | **Hires. fix** (4x-AnimeSharp ×1.5, denoise 0.4) và **ADetailer 3 bộ** (mặt `face_yolov8s` · mắt `Anzhc_Eyes_seg_hd` · tay `hand_yolov8s`, denoise 0.4/0.35/0.5) mở sẵn; dropdown **🩹 mức sửa** Tắt/Nhẹ/Chuẩn/Mạnh/Nhiều người trong UI; `AUTO_ADETAILER` ở cell 1 |
 | Giao diện | **Tiếng Việt** (song ngữ, giữ thuật ngữ Prompt/Seed/CFG/LoRA…) – `colab/vi_VN.json`, ~830 chuỗi; đổi `UI_LANGUAGE = en` để dùng tiếng Anh |
 | GPU | `GPU_MODE = max` (mặc định): `--always-high-vram` (T4) / `--always-gpu` (≥ 20 GB) + `--cuda-malloc` + `--vae-in-fp16` → model nằm hẳn trên GPU, không hoán đổi; `balanced` / `lowvram` khi cần ảnh rất lớn |
 | 🩹 Fix mắt/tay/chân | 5 style **Noob ✦ Fix mắt / tay / chân / mắt+tay+chân** + prompt ADetailer riêng cho mặt và tay; bảng tag đầy đủ: [docs/prompt_fix_mat_tay_chan.md](docs/prompt_fix_mat_tay_chan.md) |
