@@ -31,7 +31,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.4.0"
+LIB_VERSION = "1.5.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -244,6 +244,7 @@ class Config:
     ui_language: str = "vi"                   # vi (tiếng Việt) | en (English)
     port: int = 7860
     use_xformers: bool = True
+    gpu_mode: str = "max"                     # max (dùng tối đa GPU) | balanced (mặc định Forge) | lowvram (ảnh/batch lớn)
     extra_args: str = ""
     forge_commit: str = FORGE_COMMIT_TESTED
     # Mặc định UI – param_mode: recommended (dùng bộ NoobAI chuẩn, bỏ qua các default_* bên dưới) | custom
@@ -354,6 +355,70 @@ def gpu_name() -> str:
     if not has_nvidia_gpu():
         return "không có GPU"
     return capture(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"]) or "GPU không rõ"
+
+
+def gpu_vram_mb() -> int:
+    """Tổng VRAM (MB) của GPU đầu tiên; 0 nếu không có GPU."""
+    if not has_nvidia_gpu():
+        return 0
+    out = capture(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"]) or "0"
+    try:
+        return int(float(out.splitlines()[0].strip()))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def gpu_compute_capability() -> float:
+    """Compute capability (7.5 = T4/Turing, 8.x = A100/L4/Ampere…); 0 nếu không rõ."""
+    if not has_nvidia_gpu():
+        return 0.0
+    out = capture(["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"]) or ""
+    try:
+        return float(out.splitlines()[0].strip())
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def gpu_plan(cfg: "Config") -> dict:
+    """Quyết định cờ Forge + cài đặt bộ nhớ theo GPU_MODE và GPU thực tế.
+
+    max      : giữ toàn bộ model trên GPU, không hoán đổi ra RAM (nhanh nhất).
+               VRAM ≥ 20 GB (L4/A100): --always-gpu ; 12–20 GB (T4 15 GB): --always-high-vram ; < 12 GB: như balanced.
+    balanced : mặc định Forge (tự hoán đổi theo VRAM trống).
+    lowvram  : ưu tiên ảnh lớn / batch lớn: --always-normal-vram --always-offload-from-vram, chừa 4 GB cho inference.
+    """
+    mode = str(cfg.gpu_mode or "max").lower()
+    vram = gpu_vram_mb()
+    cc = gpu_compute_capability()
+    flags: list[str] = []
+    settings: dict = {"forge_inference_memory": 1024, "forge_async_loading": "Queue", "forge_pin_shared_memory": "CPU"}
+    why = []
+    if vram <= 0 or cfg.test_mode:
+        return {"mode": mode, "flags": flags, "settings": settings, "vram": vram, "cc": cc, "why": ["không có GPU"]}
+    if mode.startswith("max"):
+        if vram >= 20000:
+            flags.append("--always-gpu")
+            why.append(f"VRAM {vram/1024:.0f} GB ≥ 20 GB → toàn bộ model + VAE + text encoder nằm hẳn trên GPU")
+        elif vram >= 12000:
+            flags.append("--always-high-vram")
+            why.append(f"VRAM {vram/1024:.0f} GB → UNet nằm hẳn trên GPU (high-vram), không hoán đổi ra RAM")
+        else:
+            why.append(f"VRAM {vram/1024:.0f} GB < 12 GB → giữ chế độ tự hoán đổi của Forge")
+        flags.append("--cuda-malloc")
+        why.append("--cuda-malloc: cấp phát bộ nhớ CUDA nhanh hơn")
+        if cfg.download_vae:
+            flags.append("--vae-in-fp16")
+            why.append("--vae-in-fp16: giải mã ảnh bằng fp16 (an toàn vì dùng sdxl-vae-fp16-fix) → nhanh gấp ~2 so với fp32"
+                       + (" trên T4/Turing" if cc and cc < 8 else ""))
+        settings["forge_inference_memory"] = 1024
+        settings["show_progress_every_n_steps"] = 8
+    elif mode.startswith("low"):
+        flags += ["--always-normal-vram", "--always-offload-from-vram"]
+        settings["forge_inference_memory"] = 4096
+        why.append("chừa 4 GB VRAM cho inference, giải phóng model sau mỗi bước → ảnh/batch lớn hơn, chậm hơn")
+    else:
+        why.append("mặc định Forge")
+    return {"mode": mode, "flags": flags, "settings": settings, "vram": vram, "cc": cc, "why": why}
 
 
 def sha256sum(path: Path, bufsize: int = 1 << 24) -> str:
@@ -970,6 +1035,8 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "sdxl_refiner_low_aesthetic_score": 2.5,
         "sdxl_refiner_high_aesthetic_score": 6.0,
         "disable_all_extensions": "none",
+        # Bộ nhớ GPU (theo GPU_MODE) – xem gpu_plan()
+        **gpu_plan(cfg)["settings"],
         # Ngôn ngữ giao diện (Settings ▸ User interface ▸ Localization)
         "localization": VI_LOCALE_NAME if (str(cfg.ui_language).lower().startswith("vi") and
                                            (Paths.forge / "localizations" / f"{VI_LOCALE_NAME}.json").exists())
@@ -1149,6 +1216,10 @@ def self_test(cfg: Config) -> bool:
                 ok = False
         check(ok, f"{name}")
 
+    plan = gpu_plan(cfg)
+    check(True, f"chế độ GPU '{plan['mode']}': {' '.join(plan['flags']) or 'mặc định Forge'}"
+                f" | GPU Weights ≈ {max(plan['vram'] - plan['settings']['forge_inference_memory'], 0)} MB")
+
     tools_py = Paths.forge / "scripts" / NOOB_TOOLS_NAME
     tools_ok = tools_py.exists()
     if tools_ok:
@@ -1206,6 +1277,8 @@ def build_args(cfg: Config) -> list[str]:
         args.append("--xformers")
     if cfg.test_mode or not has_nvidia_gpu():
         args += ["--skip-torch-cuda-test", "--always-cpu"]
+    else:
+        args += gpu_plan(cfg)["flags"]
     if cfg.extra_args:
         args += cfg.extra_args.split()
     return args
@@ -1390,6 +1463,10 @@ def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), re
     kill_stale_forge()
     fix_opencv_if_no_libgl()
     args = build_args(cfg) + list(extra_args)
+    plan = gpu_plan(cfg)
+    log(f"GPU: {gpu_name()} | chế độ GPU: {plan['mode']}" + (f" (compute {plan['cc']})" if plan['cc'] else ""))
+    for w in plan["why"]:
+        log("   · " + w)
     log("COMMANDLINE_ARGS = " + " ".join(args))
     log(f"log được ghi vào {LAUNCH_LOG}")
     env = {**os.environ, **pip_env(), **forge_env(), "COMMANDLINE_ARGS": " ".join(args)}

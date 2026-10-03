@@ -83,6 +83,8 @@ THEME = "dark"  #@param ["dark", "light"]
 #@markdown Ngôn ngữ giao diện: `vi` = tiếng Việt (song ngữ, giữ thuật ngữ Prompt/Seed/CFG…), `en` = tiếng Anh gốc
 UI_LANGUAGE = "vi"  #@param ["vi", "en"]
 USE_XFORMERS = True  #@param {type:"boolean"}
+#@markdown Chế độ GPU: **max** = giữ toàn bộ model trên GPU, không hoán đổi ra RAM, VAE fp16, cuda-malloc (nhanh nhất; T4 15 GB vẫn đủ cho SDXL + Hires ×1.5 + ADetailer + 1 ControlNet). **balanced** = mặc định Forge. **lowvram** = ưu tiên ảnh/batch rất lớn (chậm hơn).
+GPU_MODE = "max"  #@param ["max", "balanced", "lowvram"]
 EXTRA_ARGS = ""  #@param {type:"string"}
 #@markdown Commit Forge đã kiểm thử; đặt `latest` để lấy bản mới nhất (có thể phát sinh lỗi mới)
 FORGE_COMMIT = "dfdcbab685e57677014f05a3309b48cc87383167"  #@param {type:"string"}
@@ -125,7 +127,7 @@ config = dict(
     verify_sha256=VERIFY_SHA256, extensions=extensions, use_repo_tag_csv=USE_REPO_TAG_CSV,
     mount_drive=MOUNT_DRIVE, save_outputs_to_drive=SAVE_OUTPUTS_TO_DRIVE, link_drive_models=LINK_DRIVE_MODELS,
     drive_folder=DRIVE_FOLDER.strip() or "NoobAI", tunnel=TUNNEL, ngrok_token=NGROK_TOKEN.strip(),
-    gradio_auth=GRADIO_AUTH.strip(), theme=THEME, ui_language=UI_LANGUAGE, use_xformers=USE_XFORMERS, extra_args=EXTRA_ARGS.strip(),
+    gradio_auth=GRADIO_AUTH.strip(), theme=THEME, ui_language=UI_LANGUAGE, use_xformers=USE_XFORMERS, gpu_mode=GPU_MODE, extra_args=EXTRA_ARGS.strip(),
     forge_commit=FORGE_COMMIT.strip(), default_width=DEFAULT_WIDTH, default_height=DEFAULT_HEIGHT,
     default_steps=DEFAULT_STEPS, default_cfg=DEFAULT_CFG, default_sampler=DEFAULT_SAMPLER,
     default_scheduler=DEFAULT_SCHEDULER, clip_skip=CLIP_SKIP,
@@ -333,9 +335,17 @@ Trong UI: dropdown **📐 Độ phân giải chuẩn** nằm ngay dưới Width/
 - **Hires. fix** như mục trên. Cả hai đều tắt được từng lần bằng cách bỏ tích trong UI; muốn tắt hẳn: `AUTO_HIRES_FIX = False` / `AUTO_ADETAILER = off` ở cell 1 → chạy lại cell 1 → `!python /content/noobai_lib.py settings` (hoặc chạy lại cell 3) → cell 6.
 - Ảnh vẫn lỗi tay: thêm style *Noob ✦ Negative: tay/anatomy*, hoặc ở gallery → *Gửi sang inpaint* → tô vùng tay → *Chỉ vùng tô*, denoise 0.5 → tạo lại vài lần.
 
+## 🚀 Dùng tối đa GPU
+- Cell 1 `GPU_MODE = max` (mặc định): Forge chạy với `--always-high-vram` (T4 15 GB) hoặc `--always-gpu` (L4/A100 ≥ 20 GB) → model, text encoder, VAE **nằm hẳn trên GPU**, không hoán đổi ra RAM giữa các bước; thêm `--cuda-malloc` và `--vae-in-fp16` (giải mã ảnh nhanh gấp ~2 trên T4 nhờ VAE fp16-fix). Cell 6 in rõ chế độ và lý do.
+- Thanh trên cùng của UI: **Trọng số trên GPU (GPU Weights, MB)** – để càng cao càng nhanh (mặc định = VRAM − 1 GB). Nếu gặp *CUDA out of memory* ở ảnh lớn: hạ xuống ~2–3 GB dưới mức tối đa, hoặc đổi `GPU_MODE = lowvram`.
+- Kiểm tra GPU đang dùng: cell ⏱ in `nvidia-smi` (tên GPU, VRAM đang dùng, % tải). Khi đang vẽ, % tải phải ≈ 95–100 %; nếu thấp và cell 6 có dòng *Moving model to CPU / swapping* → VRAM không đủ cho cấu hình hiện tại, giảm độ phân giải Hires hoặc tắt ControlNet.
+- Tăng số ảnh/giờ trên T4: giữ *Batch size* 1–2, tăng *Batch count*; dùng bộ ⚡ Nháp nhanh để tìm seed rồi mới Hires. Sampler 1 bước ≈ 1,0–1,3 s ở 832×1216 trên T4; ảnh 28 steps + Hires ×1.5 + ADetailer ≈ 60–80 s.
+- xformers đã bật (`USE_XFORMERS`). Trên L4/A100 có thể thử thêm `--cuda-stream` vào `EXTRA_ARGS` (hoán đổi và tính toán song song) – không khuyến nghị trên T4.
+
 ## 🛠 Xử lý sự cố
 | Hiện tượng | Cách xử lý |
 |---|---|
+| `CUDA out of memory` với GPU_MODE=max | Hạ *GPU Weights* trên thanh đầu UI 2–3 GB, hoặc `GPU_MODE = balanced`/`lowvram` rồi chạy lại cell 1 → `!python /content/noobai_lib.py settings` → cell 🔗 Khởi động lại |
 | **Colab tự ngắt kết nối** | Phân biệt 2 trường hợp: (a) chỉ mất kết nối trình duyệt (góc phải báo *Reconnect*, RAM/Disk vẫn hiện) → bấm Reconnect, chạy cell **🔗** là có lại link, Forge chưa hề tắt; (b) runtime bị thu hồi (máy mới, /content trống) → chạy lại cell 2 → 3 → 4 → 6 (ảnh đã nằm trên Drive). Nguyên nhân thường gặp: tab Colab bỏ không ~90 phút trong khi bạn dùng gradio.live ở tab khác → xem cell **⏱** |
 | Link gradio.live cũ không mở được | Forge đã tắt theo runtime → cell 🔗; nếu Forge còn sống mà gradio.live lỗi → cell 🔗 ACTION = Khởi động lại, hoặc dùng link dự phòng |
 | Không thấy link gradio.live | Cell 6 luôn in thêm **LINK DỰ PHÒNG (Colab proxy)** ngay khi UI lên – dùng link đó. Nếu cell 6 *kết thúc* (không chạy mãi) tức Forge đã thoát: chạy cell 🩺 để xem lỗi, hoặc đổi `TUNNEL = ngrok` |

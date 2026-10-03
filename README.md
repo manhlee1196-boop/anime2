@@ -20,6 +20,7 @@ trên nền **Stable Diffusion WebUI Forge**, chia sẻ giao diện qua **gradio
 | Độ phân giải | Dropdown **📐 Độ phân giải chuẩn** (9 bucket ~1 MP của SDXL/NoobAI) ngay dưới Width/Height; mặc định 832×1216 |
 | Tự fix | **Hires. fix** (4x-AnimeSharp ×1.5, denoise 0.4) và **ADetailer** (mặt `face_yolov8n` + tay `hand_yolov8n`) mở sẵn khi vào UI – `AUTO_HIRES_FIX` / `AUTO_ADETAILER` ở cell 1 |
 | Giao diện | **Tiếng Việt** (song ngữ, giữ thuật ngữ Prompt/Seed/CFG/LoRA…) – `colab/vi_VN.json`, ~830 chuỗi; đổi `UI_LANGUAGE = en` để dùng tiếng Anh |
+| GPU | `GPU_MODE = max` (mặc định): `--always-high-vram` (T4) / `--always-gpu` (≥ 20 GB) + `--cuda-malloc` + `--vae-in-fp16` → model nằm hẳn trên GPU, không hoán đổi; `balanced` / `lowvram` khi cần ảnh rất lớn |
 | Chống mất kết nối | Forge chạy **nền độc lập** với cell (session riêng, log ra file); mất kết nối/ngắt cell không làm tắt Forge; cell 🔗 lấy lại link / khởi động lại / dừng; cell ⏱ hướng dẫn giữ phiên |
 | Kiểm tra | Cell tự kiểm tra môi trường/model/phiên bản thư viện/bản dịch trước khi chạy |
 
