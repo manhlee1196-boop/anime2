@@ -591,6 +591,19 @@ def write_constraints() -> Path:
     return out
 
 
+def forge_env() -> dict:
+    """Biến môi trường an toàn khi chạy Forge từ trong notebook Colab/Jupyter."""
+    return {
+        # Colab đặt MPLBACKEND=module://matplotlib_inline.backend_inline → venv của Forge không có module này
+        "MPLBACKEND": "Agg",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "GRADIO_ANALYTICS_ENABLED": "False",
+        "HF_HUB_DISABLE_TELEMETRY": "1",
+        "PYTHONWARNINGS": "ignore::DeprecationWarning",
+    }
+
+
 def pip_env() -> dict:
     return {
         "PIP_CONSTRAINT": str(write_constraints()),
@@ -606,8 +619,7 @@ def prepare_forge_environment(cfg: Config) -> None:
     args = ["--exit", "--skip-torch-cuda-test", "--skip-python-version-check"]
     if cfg.use_xformers and has_nvidia_gpu() and not cfg.test_mode:
         args.append("--xformers")
-    env = {**pip_env(), "COMMANDLINE_ARGS": " ".join(args), "PYTHONUNBUFFERED": "1",
-           "GRADIO_ANALYTICS_ENABLED": "False"}
+    env = {**pip_env(), **forge_env(), "COMMANDLINE_ARGS": " ".join(args)}
     rc = run([str(Paths.python()), "launch.py"], cwd=Paths.forge, env=env, check=False)
     if rc != 0:
         log(f"⚠ launch.py --exit trả về mã {rc} – xem log phía trên")
@@ -937,6 +949,9 @@ def self_test(cfg: Config) -> bool:
         for mod in ("gradio", "transformers", "diffusers", "safetensors", "clip", "open_clip", "cv2"):
             rc = subprocess.run([str(py), "-c", f"import {mod}"], capture_output=True).returncode
             check(rc == 0, f"module {mod}")
+        rc = subprocess.run([str(py), "-c", "import pytorch_lightning, matplotlib"], capture_output=True,
+                            env={**os.environ, "MPLBACKEND": "module://matplotlib_inline.backend_inline", **forge_env()}).returncode
+        check(rc == 0, "import pytorch_lightning/matplotlib với env kiểu Colab (MPLBACKEND)")
         npv = capture([str(py), "-c", "import numpy;print(numpy.__version__)"])
         check(npv.startswith("1."), f"numpy {npv} (Forge cần numpy 1.x – extension không được nâng lên 2.x)")
         hx = capture([str(py), "-c", "import httpx;print(httpx.__version__)"])
@@ -1046,6 +1061,7 @@ KNOWN_ERRORS = [
     ("No module named 'xformers'", "xformers lỗi. Đặt USE_XFORMERS=False ở cell 1, chạy lại cell 1 và 6."),
     ("Killed", "Tiến trình bị hệ thống kill (hết RAM). Dùng runtime High-RAM hoặc tắt bớt extension."),
     ("No checkpoints found", "Chưa có model. Chạy lại cell 4 (tải tài nguyên)."),
+    ("matplotlib_inline.backend_inline", "Biến MPLBACKEND của Colab rò sang Forge – bản lib mới đã sửa; chạy lại cell 2 rồi cell 6."),
 ]
 
 
@@ -1107,8 +1123,11 @@ def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), re
     args = build_args(cfg) + list(extra_args)
     log("COMMANDLINE_ARGS = " + " ".join(args))
     log(f"log được ghi vào {LAUNCH_LOG}")
-    env = {**os.environ, **pip_env(), "COMMANDLINE_ARGS": " ".join(args), "PYTHONUNBUFFERED": "1",
-           "GRADIO_ANALYTICS_ENABLED": "False", "HF_HUB_DISABLE_TELEMETRY": "1", "PYTHONIOENCODING": "utf-8"}
+    env = {**os.environ, **pip_env(), **forge_env(), "COMMANDLINE_ARGS": " ".join(args)}
+    # Dọn các biến IPython/Colab có thể rò sang tiến trình con
+    for k in list(env):
+        if k.startswith(("JPY_", "IPY", "COLAB_BACKEND", "KERNEL_")):
+            env.pop(k, None)
     if cfg.hf_token:
         env["HF_TOKEN"] = cfg.hf_token
     proc = subprocess.Popen([str(py), "launch.py"], cwd=str(Paths.forge), env=env,
