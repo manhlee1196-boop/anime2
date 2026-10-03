@@ -12,6 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 LIB = HERE / "noobai_lib.py"
+VI_LOCALE = HERE / "vi_VN.json"
 OUT = REPO / "NoobAI_XL_1.1_Colab.ipynb"
 
 GITHUB_USER_REPO = "manhlee1196-boop/anime2"
@@ -78,6 +79,8 @@ NGROK_TOKEN = ""  #@param {type:"string"}
 #@markdown Đặt mật khẩu cho link công khai (dạng `user:pass`), để trống nếu không cần
 GRADIO_AUTH = ""  #@param {type:"string"}
 THEME = "dark"  #@param ["dark", "light"]
+#@markdown Ngôn ngữ giao diện: `vi` = tiếng Việt (song ngữ, giữ thuật ngữ Prompt/Seed/CFG…), `en` = tiếng Anh gốc
+UI_LANGUAGE = "vi"  #@param ["vi", "en"]
 USE_XFORMERS = True  #@param {type:"boolean"}
 EXTRA_ARGS = ""  #@param {type:"string"}
 #@markdown Commit Forge đã kiểm thử; đặt `latest` để lấy bản mới nhất (có thể phát sinh lỗi mới)
@@ -105,7 +108,7 @@ config = dict(
     verify_sha256=VERIFY_SHA256, extensions=extensions, use_repo_tag_csv=USE_REPO_TAG_CSV,
     mount_drive=MOUNT_DRIVE, save_outputs_to_drive=SAVE_OUTPUTS_TO_DRIVE, link_drive_models=LINK_DRIVE_MODELS,
     drive_folder=DRIVE_FOLDER.strip() or "NoobAI", tunnel=TUNNEL, ngrok_token=NGROK_TOKEN.strip(),
-    gradio_auth=GRADIO_AUTH.strip(), theme=THEME, use_xformers=USE_XFORMERS, extra_args=EXTRA_ARGS.strip(),
+    gradio_auth=GRADIO_AUTH.strip(), theme=THEME, ui_language=UI_LANGUAGE, use_xformers=USE_XFORMERS, extra_args=EXTRA_ARGS.strip(),
     forge_commit=FORGE_COMMIT.strip(), default_width=DEFAULT_WIDTH, default_height=DEFAULT_HEIGHT,
     default_steps=DEFAULT_STEPS, default_cfg=DEFAULT_CFG, default_sampler=DEFAULT_SAMPLER,
     default_scheduler=DEFAULT_SCHEDULER, clip_skip=CLIP_SKIP,
@@ -220,6 +223,7 @@ worst quality, old, early, low quality, lowres, signature, username, logo, bad h
 | `CUDA out of memory` | Giảm kích thước ảnh / batch, tắt ControlNet, hoặc thêm `--always-low-vram` vào EXTRA_ARGS |
 | Model không hiện trong danh sách | Chạy lại cell 4 (tải sẽ tiếp tục nếu bị đứt), bấm 🔄 Refresh trong UI |
 | Colab báo "disallowed code" | Giới hạn của Colab miễn phí với WebUI – cân nhắc Colab Pro |
+| Muốn đổi UI sang tiếng Anh / Việt | Trong UI: **Cài đặt ▸ Giao diện người dùng ▸ Ngôn ngữ (Localization)** chọn `None` (Anh) hoặc `vi_VN` (Việt) → *Áp dụng cài đặt* → *Tải lại UI*. Hoặc đặt `UI_LANGUAGE` ở cell 1 rồi chạy lại cell 1 → 3 → 6 |
 | Thêm extension mới qua UI | Sau khi cài trong tab Extensions, chạy lại cell 3 rồi cell 6 (để installer chạy với ràng buộc phiên bản) |
 
 Mọi logic cài đặt nằm trong `colab/noobai_lib.py` của repo – notebook này được sinh tự động bởi `colab/build_notebook.py`.
@@ -237,8 +241,18 @@ def code(src: str, *, cellview: str | None = None) -> dict:
     return {"cell_type": "code", "metadata": meta, "execution_count": None, "outputs": [], "source": src}
 
 
+def embed_locale(lib_src: str) -> str:
+    """Chèn colab/vi_VN.json vào hằng VI_LOCALE_EMBEDDED để notebook tự chứa bản dịch tiếng Việt."""
+    data = json.loads(VI_LOCALE.read_text(encoding="utf-8"))
+    data.pop("__comment__", None)
+    marker = "VI_LOCALE_EMBEDDED: dict | None = None"
+    assert marker in lib_src, "không tìm thấy VI_LOCALE_EMBEDDED trong noobai_lib.py"
+    literal = json.dumps(data, ensure_ascii=False, indent=1)  # JSON object = dict literal hợp lệ trong Python
+    return lib_src.replace(marker, f"VI_LOCALE_EMBEDDED: dict | None = {literal}", 1)
+
+
 def build() -> dict:
-    lib_src = LIB.read_text(encoding="utf-8")
+    lib_src = embed_locale(LIB.read_text(encoding="utf-8"))
     lib_cell = "#@title 2️⃣ Ghi thư viện cài đặt (noobai_lib.py) – chỉ cần chạy, không cần sửa\n" \
                "%%writefile /content/noobai_lib.py\n" + lib_src
     cells = [

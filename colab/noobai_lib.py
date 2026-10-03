@@ -30,7 +30,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.0.0"
+LIB_VERSION = "1.1.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -53,6 +53,17 @@ TAG_CSV_URLS = [
     # GitHub API trả nội dung raw (hoạt động cả khi raw.githubusercontent.com bị chặn)
     f"https://api.github.com/repos/manhlee1196-boop/anime2/contents/{TAG_CSV_NAME}?ref=main",
 ]
+
+# Bản dịch tiếng Việt cho giao diện Forge (file nằm cạnh noobai_lib.py trong Colab, hoặc tải từ repo)
+VI_LOCALE_NAME = "vi_VN"
+VI_LOCALE_URLS = [
+    f"https://github.com/manhlee1196-boop/anime2/raw/main/colab/{VI_LOCALE_NAME}.json",
+    f"https://raw.githubusercontent.com/manhlee1196-boop/anime2/main/colab/{VI_LOCALE_NAME}.json",
+    f"https://api.github.com/repos/manhlee1196-boop/anime2/contents/colab/{VI_LOCALE_NAME}.json?ref=main",
+]
+
+# build_notebook.py sẽ chèn nội dung colab/vi_VN.json vào đây để notebook tự chứa bản dịch (không cần tải thêm)
+VI_LOCALE_EMBEDDED: dict | None = None
 
 HF = "https://huggingface.co"
 
@@ -208,6 +219,7 @@ class Config:
     ngrok_token: str = ""
     gradio_auth: str = ""                     # "user:pass"
     theme: str = "dark"
+    ui_language: str = "vi"                   # vi (tiếng Việt) | en (English)
     port: int = 7860
     use_xformers: bool = True
     extra_args: str = ""
@@ -693,6 +705,45 @@ def install_tag_csv(cfg: Config) -> Path | None:
     return None
 
 
+def install_localization(cfg: Config) -> Path | None:
+    """Cài bản dịch tiếng Việt vào <forge>/localizations/vi_VN.json (Forge tự nạp qua cài đặt `localization`)."""
+    dest_dir = Paths.forge / "localizations"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{VI_LOCALE_NAME}.json"
+    here = Path(__file__).resolve().parent
+    candidates = [here / f"{VI_LOCALE_NAME}.json",                 # Colab: /content/vi_VN.json
+                  here.parent / "colab" / f"{VI_LOCALE_NAME}.json",  # chạy từ repo
+                  Path("/content") / f"{VI_LOCALE_NAME}.json"]
+    for local in candidates:
+        if local.exists() and local.stat().st_size > 1000:
+            try:
+                json.loads(local.read_text(encoding="utf-8"))
+                shutil.copy2(local, dest)
+                log(f"✔ bản dịch tiếng Việt: {dest} ({human(dest.stat().st_size)})")
+                return dest
+            except Exception as e:  # noqa: BLE001
+                log(f"⚠ file dịch {local} lỗi: {e}")
+    if VI_LOCALE_EMBEDDED:
+        dest.write_text(json.dumps(VI_LOCALE_EMBEDDED, ensure_ascii=False, indent=2), encoding="utf-8")
+        log(f"✔ bản dịch tiếng Việt (nhúng sẵn, {len(VI_LOCALE_EMBEDDED)} chuỗi) → {dest}")
+        return dest
+    if dest.exists() and dest.stat().st_size > 1000:
+        log(f"✔ bản dịch tiếng Việt đã có: {dest.name}")
+        return dest
+    for url in VI_LOCALE_URLS:
+        try:
+            download_file(url, dest, cfg)
+            json.loads(dest.read_text(encoding="utf-8"))
+            log(f"✔ tải bản dịch tiếng Việt từ {url}")
+            return dest
+        except Exception as e:  # noqa: BLE001
+            log(f"không tải được từ {url}: {e}")
+            if dest.exists():
+                dest.unlink()
+    log("⚠ không có bản dịch tiếng Việt → giao diện sẽ hiển thị tiếng Anh")
+    return None
+
+
 def setup_drive(cfg: Config) -> dict:
     """Mount Google Drive (chỉ trong Colab) và liên kết thư mục outputs / models."""
     info = {"mounted": False, "outputs": str(Paths.forge / "outputs")}
@@ -848,6 +899,10 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "sdxl_refiner_low_aesthetic_score": 2.5,
         "sdxl_refiner_high_aesthetic_score": 6.0,
         "disable_all_extensions": "none",
+        # Ngôn ngữ giao diện (Settings ▸ User interface ▸ Localization)
+        "localization": VI_LOCALE_NAME if (str(cfg.ui_language).lower().startswith("vi") and
+                                           (Paths.forge / "localizations" / f"{VI_LOCALE_NAME}.json").exists())
+                        else "None",
         # Tag Autocomplete
         "tac_tagFile": TAG_CSV_NAME if (cfg.use_repo_tag_csv and
                                          (Paths.extensions() / EXTENSIONS["tagcomplete"][0] / "tags" / TAG_CSV_NAME).exists())
@@ -871,7 +926,7 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         "ad_save_previews": False,
     }
     _merge_json(Paths.forge / "config.json", settings)
-    log("✔ config.json")
+    log(f"✔ config.json (ngôn ngữ giao diện: {settings['localization']})")
 
     ui = {
         "txt2img/Prompt/value": NOOB_POSITIVE_PREFIX,
@@ -1003,6 +1058,20 @@ def self_test(cfg: Config) -> bool:
             except Exception:  # noqa: BLE001
                 ok = False
         check(ok, f"{name}")
+
+    if str(cfg.ui_language).lower().startswith("vi"):
+        loc = Paths.forge / "localizations" / f"{VI_LOCALE_NAME}.json"
+        n_keys = 0
+        try:
+            n_keys = len(json.loads(loc.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            applied = json.loads((Paths.forge / "config.json").read_text(encoding="utf-8")).get("localization")
+        except Exception:  # noqa: BLE001
+            applied = None
+        check(n_keys > 100 and applied == VI_LOCALE_NAME,
+              f"giao diện tiếng Việt ({n_keys} chuỗi dịch, localization={applied})")
 
     free = shutil.disk_usage(str(ROOT)).free
     check(free > 3 * 1024 ** 3, f"dung lượng trống còn {human(free)}")
@@ -1247,6 +1316,7 @@ def install(cfg: Config) -> dict:
     install_extensions(cfg)
     prepare_forge_environment(cfg)
     install_tag_csv(cfg)
+    install_localization(cfg)
     drive_info = setup_drive(cfg)
     write_settings(cfg, drive_info)
     (ROOT / "noobai_drive.json").write_text(json.dumps(drive_info), encoding="utf-8")
@@ -1262,9 +1332,24 @@ def download(cfg: Config) -> None:
     write_settings(cfg, drive_info)
 
 
+def set_ui_language(cfg: Config, language: str | None = None) -> str:
+    """Đổi ngôn ngữ giao diện (vi/en) mà không cần cài lại; có hiệu lực sau khi khởi động lại / Reload UI."""
+    if language:
+        cfg.ui_language = language
+    if str(cfg.ui_language).lower().startswith("vi"):
+        install_localization(cfg)
+    drive_path = ROOT / "noobai_drive.json"
+    drive_info = json.loads(drive_path.read_text()) if drive_path.exists() else {}
+    write_settings(cfg, drive_info)
+    return json.loads((Paths.forge / "config.json").read_text(encoding="utf-8")).get("localization", "None")
+
+
 def main(argv: list[str]) -> int:
     cfg = Config.load()
     step = argv[1] if len(argv) > 1 else "all"
+    if step == "lang":
+        print("localization =", set_ui_language(cfg, argv[2] if len(argv) > 2 else None))
+        return 0
     if step in ("install", "all"):
         install(cfg)
     if step in ("download", "all"):

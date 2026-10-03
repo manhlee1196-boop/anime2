@@ -16,7 +16,8 @@ trên nền **Stable Diffusion WebUI Forge**, chia sẻ giao diện qua **gradio
 | Extensions | Tag Autocomplete (dùng file tag trong repo này), ADetailer (+ model YOLO tải sẵn), Infinite Image Browsing, Ultimate SD Upscale, Dynamic Prompts, Civitai Helper, WD14 Tagger*, Regional Prompter* |
 | Mặc định | Prompt/negative chính thức của NoobAI, Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2, 14 preset Styles |
 | Drive | Lưu ảnh ra Drive; liên kết `MyDrive/NoobAI/{models,Lora,embeddings,VAE,ControlNet}` |
-| Kiểm tra | Cell tự kiểm tra môi trường/model/phiên bản thư viện trước khi chạy |
+| Giao diện | **Tiếng Việt** (song ngữ, giữ thuật ngữ Prompt/Seed/CFG/LoRA…) – `colab/vi_VN.json`, ~830 chuỗi; đổi `UI_LANGUAGE = en` để dùng tiếng Anh |
+| Kiểm tra | Cell tự kiểm tra môi trường/model/phiên bản thư viện/bản dịch trước khi chạy |
 
 \* tuỳ chọn, tắt mặc định.
 
@@ -31,7 +32,8 @@ Thời gian lần đầu trên T4: ~3–5 phút cài + ~2–4 phút tải (~9,4 
 ```
 NoobAI_XL_1.1_Colab.ipynb   # notebook (SINH TỰ ĐỘNG – đừng sửa tay)
 colab/noobai_lib.py         # toàn bộ logic cài đặt / tải / cấu hình / tự kiểm tra / khởi chạy
-colab/build_notebook.py     # sinh notebook từ noobai_lib.py:  python colab/build_notebook.py
+colab/build_notebook.py     # sinh notebook từ noobai_lib.py (+ nhúng vi_VN.json):  python colab/build_notebook.py
+colab/vi_VN.json            # bản dịch tiếng Việt cho giao diện Forge (cài vào <forge>/localizations/vi_VN.json)
 danbooru_e621_merged_*.csv  # 349 714 tag Danbooru + e621 (định dạng Tag Autocomplete: tag,category,count,aliases)
 ```
 
@@ -44,6 +46,9 @@ Chạy thử ngoài Colab (CPU, chỉ để kiểm tra bộ cài):
 echo '{"test_mode": true, "download_model": false, "mount_drive": false, "tunnel": "none"}' > /tmp/noob/noobai_config.json
 NOOBAI_ROOT=/tmp/noob python colab/noobai_lib.py all
 ```
+
+Đổi ngôn ngữ giao diện sau khi đã cài (không cần cài lại):
+`python colab/noobai_lib.py lang vi` hoặc `lang en`, hoặc trong UI: *Cài đặt ▸ Giao diện người dùng ▸ Ngôn ngữ (Localization)* → `vi_VN` / `None` → Áp dụng → Tải lại UI.
 
 > ⚠️ Colab miễn phí có thể hạn chế việc chạy WebUI; khuyến nghị Colab Pro.
 
