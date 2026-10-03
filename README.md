@@ -16,6 +16,7 @@ trên nền **Stable Diffusion WebUI Forge**, chia sẻ giao diện qua **gradio
 | Extensions | Tag Autocomplete (dùng file tag trong repo này), ADetailer (+ model YOLO tải sẵn), Infinite Image Browsing, Ultimate SD Upscale, Dynamic Prompts, Civitai Helper, WD14 Tagger*, Regional Prompter* |
 | Mặc định | Prompt/negative chính thức của NoobAI, Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2, 14 preset Styles |
 | Drive | Lưu ảnh ra Drive; liên kết `MyDrive/NoobAI/{models,Lora,embeddings,VAE,ControlNet}` |
+| Thông số | Dropdown **⚙️ Thông số tạo ảnh** trên Sampling method: 5 bộ khuyên dùng (chuẩn / nháp nhanh / chất lượng cao / sáng tạo / chính xác) đặt toàn bộ sampler·steps·CFG·kích thước·Hires fix, hoặc *Tuỳ chỉnh* (tự chuyển khi sửa tay); cell 1 `PARAM_MODE` |
 | Độ phân giải | Dropdown **📐 Độ phân giải chuẩn** (9 bucket ~1 MP của SDXL/NoobAI) ngay dưới Width/Height; mặc định 832×1216 |
 | Tự fix | **Hires. fix** (4x-AnimeSharp ×1.5, denoise 0.4) và **ADetailer** (mặt `face_yolov8n` + tay `hand_yolov8n`) mở sẵn khi vào UI – `AUTO_HIRES_FIX` / `AUTO_ADETAILER` ở cell 1 |
 | Giao diện | **Tiếng Việt** (song ngữ, giữ thuật ngữ Prompt/Seed/CFG/LoRA…) – `colab/vi_VN.json`, ~830 chuỗi; đổi `UI_LANGUAGE = en` để dùng tiếng Anh |

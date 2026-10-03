@@ -30,7 +30,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.2.0"
+LIB_VERSION = "1.3.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -245,7 +245,8 @@ class Config:
     use_xformers: bool = True
     extra_args: str = ""
     forge_commit: str = FORGE_COMMIT_TESTED
-    # Mặc định UI
+    # Mặc định UI – param_mode: recommended (dùng bộ NoobAI chuẩn, bỏ qua các default_* bên dưới) | custom
+    param_mode: str = "recommended"
     default_width: int = 832
     default_height: int = 1216
     default_steps: int = 28
@@ -908,8 +909,20 @@ def _merge_json(path: Path, updates: dict) -> None:
     path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
 
 
+RECOMMENDED_PARAMS = dict(default_width=832, default_height=1216, default_steps=28, default_cfg=6.0,
+                          default_sampler="Euler a", default_scheduler="Automatic", clip_skip=2,
+                          auto_hires_fix=True, hires_upscale_by=1.5, hires_denoise=0.4, auto_adetailer="face+hand")
+
+
 def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
     banner("Ghi cấu hình mặc định cho NoobAI-XL")
+    if str(cfg.param_mode).lower().startswith("rec"):
+        for k, v in RECOMMENDED_PARAMS.items():
+            setattr(cfg, k, v)
+        log("thông số: bộ KHUYÊN DÙNG NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires ×1.5/0.4 · ADetailer mặt+tay)")
+    else:
+        log(f"thông số: TỰ CHỈNH ({cfg.default_sampler} · {cfg.default_steps} steps · CFG {cfg.default_cfg} · "
+            f"{cfg.default_width}×{cfg.default_height} · Hires {'on' if cfg.auto_hires_fix else 'off'} · ADetailer {cfg.auto_adetailer})")
     drive_info = drive_info or {}
     outputs = Path(drive_info.get("outputs") or (Paths.forge / "outputs"))
     vae_path = Paths.models("VAE") / VAE_FILES["sdxl_vae_fp16_fix"]["name"]
@@ -1017,6 +1030,7 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
     tools = {
         "auto_hires_fix": bool(cfg.auto_hires_fix),
         "auto_adetailer": ad if "adetailer" in cfg.extensions else "off",
+        "param_mode": "recommended" if str(cfg.param_mode).lower().startswith("rec") else "custom",
     }
     (Paths.forge / "noob_tools.json").write_text(json.dumps(tools, ensure_ascii=False, indent=2), encoding="utf-8")
     log(f"✔ noob_tools.json (tự fix: hires={tools['auto_hires_fix']}, adetailer={tools['auto_adetailer']})")

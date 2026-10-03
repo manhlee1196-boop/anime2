@@ -87,7 +87,9 @@ EXTRA_ARGS = ""  #@param {type:"string"}
 #@markdown Commit Forge đã kiểm thử; đặt `latest` để lấy bản mới nhất (có thể phát sinh lỗi mới)
 FORGE_COMMIT = "dfdcbab685e57677014f05a3309b48cc87383167"  #@param {type:"string"}
 
-#@markdown ### 🎛 Mặc định khi mở UI
+#@markdown ### 🎛 Thông số tạo ảnh
+#@markdown **Khuyên dùng** = bộ chuẩn NoobAI (Euler a · 28 steps · CFG 6 · 832×1216 · Clip skip 2 · Hires fix ×1.5/0.4 · ADetailer mặt+tay) – các ô bên dưới sẽ bị bỏ qua. **Tự chỉnh** = dùng các ô bên dưới. Trong UI vẫn đổi được bằng dropdown ⚙️ phía trên Sampling method.
+PARAM_MODE = "Khuyên dùng (NoobAI chuẩn)"  #@param ["Khuyên dùng (NoobAI chuẩn)", "Tự chỉnh (dùng các ô bên dưới)"]
 #@markdown Độ phân giải chuẩn (bucket ~1 MP mà NoobAI-XL được huấn luyện). Trong UI vẫn đổi được bằng dropdown 📐 dưới Width/Height.
 DEFAULT_RESOLUTION = "832x1216 (dọc 2:3 – chuẩn NoobAI)"  #@param ["832x1216 (dọc 2:3 – chuẩn NoobAI)", "1216x832 (ngang 3:2)", "1024x1024 (vuông)", "896x1152 (dọc 7:9)", "1152x896 (ngang 9:7)", "768x1344 (dọc 9:16)", "1344x768 (ngang 16:9)", "640x1536 (dọc 5:12)", "1536x640 (ngang 12:5)"]
 #@markdown Hoặc tự nhập (ví dụ `1024x1536`), để trống để dùng mục trên
@@ -129,6 +131,7 @@ config = dict(
     default_scheduler=DEFAULT_SCHEDULER, clip_skip=CLIP_SKIP,
     auto_hires_fix=AUTO_HIRES_FIX, hires_upscale_by=float(HIRES_UPSCALE_BY), hires_denoise=float(HIRES_DENOISE),
     auto_adetailer=AUTO_ADETAILER,
+    param_mode="recommended" if PARAM_MODE.startswith("Khuyên") else "custom",
 )
 os.makedirs("/content", exist_ok=True)
 with open("/content/noobai_config.json", "w", encoding="utf-8") as f:
@@ -232,6 +235,23 @@ worst quality, old, early, low quality, lowres, signature, username, logo, bad h
 - Phong cách hoạ sĩ: `artist:xxx` hoặc chỉ tên hoạ sĩ theo Danbooru. Năm: `newest / recent / mid / early / old`.
 - Hires fix: 4x-AnimeSharp × 1.5, denoise 0.35–0.45 (đã đặt mặc định). ADetailer: bật `face_yolov8n.pt` để sửa mặt.
 - ControlNet Union ProMax: chọn model `xinsir_controlnet_union_sdxl_promax`, chọn preprocessor tương ứng (canny/depth/openpose/lineart/tile…).
+
+## ⚙️ Thông số khuyên dùng hay tự chỉnh?
+- Cell 1 `PARAM_MODE`: **Khuyên dùng** (bộ NoobAI chuẩn, bỏ qua các ô chi tiết) hoặc **Tự chỉnh** (dùng các ô Width/Height/Steps/CFG/Sampler/Hires/ADetailer).
+- Trong UI, dropdown **⚙️ Thông số tạo ảnh** nằm ngay trên *Sampling method* (txt2img và img2img). Mỗi bộ đặt **toàn bộ** sampler · scheduler · steps · CFG · kích thước · batch · Hires fix (bật/tắt, upscaler, ×, steps, denoise, CFG):
+
+| Bộ (txt2img) | Khi nào dùng | Thông số |
+|---|---|---|
+| ✅ Khuyên dùng – NoobAI chuẩn | mặc định, đa số trường hợp | Euler a · Automatic · 28 · CFG 6 · 832×1216 · Hires 4x-AnimeSharp ×1.5, 14 steps, denoise 0.4 |
+| ⚡ Nháp nhanh | thử prompt / tìm seed | Euler a · 20 · CFG 5.5 · Hires tắt (nhanh gấp ~3) |
+| 💎 Chất lượng cao | ảnh cuối, in ấn | DPM++ 2M SDE · Karras · 32 · CFG 6.5 · Hires ×2, 16 steps, denoise 0.35 |
+| 🎨 Sáng tạo | muốn đa dạng, ít bám prompt | Euler a · 30 · CFG 4.5 · Hires ×1.5, denoise 0.45 |
+| 🎯 Chính xác | bám prompt chặt, ít ngẫu nhiên | DPM++ 2M · Karras · 30 · CFG 7.5 · Hires ×1.5, denoise 0.3 |
+| ✏️ Tuỳ chỉnh | tự đặt | tự động chuyển sang mục này khi bạn sửa tay bất kỳ thông số nào |
+
+img2img có bộ riêng: *Khuyên dùng* (denoise 0.5) · *Nhẹ* (0.3, giữ ảnh) · *Mạnh* (0.7, vẽ lại nhiều) · *Phóng to* (DPM++ 2M Karras, 0.3 – dùng với Ultimate SD Upscale).
+
+Ý nghĩa từng thông số: **Steps** – số bước vẽ (20 nháp, 28 chuẩn, 32–40 kỹ; hơn 40 gần như không đẹp thêm). **CFG** – độ bám prompt (4–5 sáng tạo, 6 chuẩn, 7–8 chặt; >9 cháy màu). **Sampler** – Euler a mềm/anime, DPM++ 2M (SDE) Karras sắc nét hơn. **Denoise** (Hires/img2img) – mức được phép thay đổi ảnh (0.3 giữ, 0.5 vừa, 0.7 vẽ lại). **Clip skip** = 2 cho NoobAI (thanh trên cùng). **Batch count/size** – số ảnh mỗi lần bấm (T4: batch size 1–2).
 
 ## 📐 Độ phân giải chuẩn
 NoobAI-XL (SDXL) được huấn luyện ở ~1 megapixel – vẽ đúng các cỡ này sẽ ít lỗi tay/chân/bố cục nhất:
