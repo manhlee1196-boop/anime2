@@ -18,6 +18,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -30,7 +31,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.3.0"
+LIB_VERSION = "1.4.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -1235,23 +1236,23 @@ KNOWN_ERRORS = [
 
 def kill_stale_forge() -> None:
     """Dọn tiến trình Forge cũ còn chạy ngầm (ví dụ cell trước bị văng) để không kẹt cổng."""
-    me = os.getpid()
-    marker = str(Paths.forge / "launch.py")
-    killed = 0
-    for pid_dir in Path("/proc").glob("[0-9]*"):
+    pids = forge_pids()
+    for pid in pids:
         try:
-            pid = int(pid_dir.name)
-            if pid == me:
-                continue
-            cmd = (pid_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
-            if marker in cmd:
-                os.kill(pid, 15)
-                killed += 1
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
         except Exception:  # noqa: BLE001
-            continue
-    if killed:
-        log(f"đã dừng {killed} tiến trình Forge cũ")
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:  # noqa: BLE001
+                pass
+    if pids:
+        log(f"đã dừng {len(pids)} tiến trình Forge cũ")
         time.sleep(3)
+        for pid in forge_pids():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def colab_proxy_url(port: int) -> str | None:
@@ -1281,7 +1282,107 @@ def diagnose(lines: list[str], returncode: int | None) -> None:
     print("!" * 70 + "\n", flush=True)
 
 
-def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), ready_timeout: int = 0):
+URLS_FILE = ROOT / "noobai_urls.json"
+PID_FILE = ROOT / "noobai_forge.pid"
+# Sau khi UI đã lên, chỉ in các dòng log quan trọng (tránh làm nặng trình duyệt Colab → dễ mất kết nối)
+IMPORTANT_LOG = re.compile(r"(error|exception|traceback|warning|out of memory|outofmemory|cuda|gradio\.live|ngrok|"
+                           r"running on|total progress|model loaded|loading weights|interrupted|skipped|"
+                           r"killed|stopped|restart)", re.I)
+
+
+def forge_pids() -> list[int]:
+    """PID các tiến trình Forge (launch.py / webui.py chạy trong thư mục Forge) đang chạy nền."""
+    me = os.getpid()
+    forge_dir = str(Paths.forge.resolve())
+    pids = []
+    for pid_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            pid = int(pid_dir.name)
+            if pid == me:
+                continue
+            cmd = (pid_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+            if "launch.py" not in cmd and "webui.py" not in cmd:
+                continue
+            if forge_dir in cmd or os.path.realpath(str(pid_dir / "cwd")) == forge_dir:
+                pids.append(pid)
+        except Exception:  # noqa: BLE001
+            pass
+    return pids
+
+
+def port_open(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1)
+        return sock.connect_ex(("127.0.0.1", int(port))) == 0
+
+
+def forge_alive(cfg: Config | None = None) -> bool:
+    cfg = cfg or Config.load()
+    return bool(forge_pids()) and port_open(cfg.port)
+
+
+def _save_urls(urls: list[str], proxy: str | None) -> None:
+    try:
+        URLS_FILE.write_text(json.dumps({"public": urls, "proxy": proxy, "time": time.time()}), encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def saved_urls() -> dict:
+    try:
+        return json.loads(URLS_FILE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def urls_from_log() -> list[str]:
+    if not LAUNCH_LOG.exists():
+        return []
+    text = LAUNCH_LOG.read_text(encoding="utf-8", errors="replace")
+    found: list[str] = []
+    for pat in URL_PATTERNS:
+        for m in pat.findall(text):
+            if m not in found:
+                found.append(m)
+    return found
+
+
+def show_ready(url: str, label: str = "GIAO DIỆN ĐÃ SẴN SÀNG") -> None:
+    print("\n" + "★" * 70 + f"\n★  {label} → {url}\n" + "★" * 70 + "\n", flush=True)
+
+
+def stop_forge() -> int:
+    """Dừng hẳn Forge đang chạy nền."""
+    pids = forge_pids()
+    for pid in pids:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except Exception:  # noqa: BLE001
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:  # noqa: BLE001
+                pass
+    time.sleep(3)
+    for pid in forge_pids():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:  # noqa: BLE001
+            pass
+    if pids:
+        log(f"⏹ đã dừng Forge (pid {pids})")
+    else:
+        log("Forge không chạy")
+    return len(pids)
+
+
+def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), ready_timeout: int = 0,
+           quiet_after_ready: bool = True):
+    """Khởi chạy Forge dưới dạng tiến trình nền ĐỘC LẬP (session riêng, log ghi thẳng ra file).
+
+    - Cell Colab chỉ "theo dõi" log: trình duyệt mất kết nối / cell bị ngắt → Forge vẫn chạy, link vẫn sống.
+    - Dùng reconnect() (cell 🔗) để lấy lại link, stop_forge() để dừng hẳn.
+    """
     banner("Khởi chạy NoobAI-XL 1.1 (Forge)")
     py = Paths.python()
     if not py.exists() or not (Paths.forge / "launch.py").exists():
@@ -1292,76 +1393,146 @@ def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), re
     log("COMMANDLINE_ARGS = " + " ".join(args))
     log(f"log được ghi vào {LAUNCH_LOG}")
     env = {**os.environ, **pip_env(), **forge_env(), "COMMANDLINE_ARGS": " ".join(args)}
-    # Dọn các biến IPython/Colab có thể rò sang tiến trình con
     for k in list(env):
         if k.startswith(("JPY_", "IPY", "COLAB_BACKEND", "KERNEL_")):
             env.pop(k, None)
     if cfg.hf_token:
         env["HF_TOKEN"] = cfg.hf_token
-    proc = subprocess.Popen([str(py), "launch.py"], cwd=str(Paths.forge), env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            encoding="utf-8", errors="replace", bufsize=1)
-    public_urls: list[str] = []
-    local_ready = False
+    if URLS_FILE.exists():
+        URLS_FILE.unlink()
+    logf = LAUNCH_LOG.open("wb")
+    proc = subprocess.Popen([str(py), str(Paths.forge / "launch.py")], cwd=str(Paths.forge), env=env,
+                            stdin=subprocess.DEVNULL, stdout=logf, stderr=subprocess.STDOUT,
+                            start_new_session=True)  # session riêng → không chết theo cell/kernel
+    logf.close()
+    PID_FILE.write_text(str(proc.pid), encoding="utf-8")
+    log(f"Forge chạy nền, pid {proc.pid} (mất kết nối Colab cũng không tắt; dừng hẳn bằng cell 🔗 → Dừng)")
+    public_urls = follow_log(cfg, proc, wait=wait, ready_timeout=ready_timeout, quiet_after_ready=quiet_after_ready)
+    return proc, public_urls
+
+
+def follow_log(cfg: Config, proc: "subprocess.Popen | None" = None, *, wait: bool = True, ready_timeout: int = 0,
+               quiet_after_ready: bool = True, from_start: bool = True) -> list[str]:
+    """Theo dõi noobai_launch.log, in link khi UI lên; trả về danh sách link công khai."""
+    public_urls: list[str] = list(saved_urls().get("public", [])) if not from_start else []
+    local_ready = not from_start and bool(saved_urls())
     share_failed = False
-    interrupted = False
+    proxy = None
     tail: list[str] = []
     t0 = time.time()
-    logf = LAUNCH_LOG.open("w", encoding="utf-8")
+    buf = ""
 
-    def show_ready(url: str, label: str = "GIAO DIỆN ĐÃ SẴN SÀNG") -> None:
-        print("\n" + "★" * 70 + f"\n★  {label} → {url}\n" + "★" * 70 + "\n", flush=True)
+    def alive() -> bool:
+        if proc is not None:
+            return proc.poll() is None
+        return bool(forge_pids())
 
-    try:
-        for line in proc.stdout:  # type: ignore[union-attr]
-            logf.write(line)
-            logf.flush()
-            tail.append(line)
-            if len(tail) > 400:
-                del tail[:100]
+    def handle(line: str) -> bool:
+        nonlocal local_ready, share_failed, proxy
+        tail.append(line)
+        if len(tail) > 400:
+            del tail[:100]
+        important = bool(IMPORTANT_LOG.search(line))
+        if not local_ready or not quiet_after_ready or important:
             try:
-                sys.stdout.write(line)
+                sys.stdout.write(line.rsplit("\r", 1)[-1] if "\r" in line else line)
                 sys.stdout.flush()
             except Exception:  # noqa: BLE001
                 pass
-            for pat in URL_PATTERNS:
-                for m in pat.findall(line):
-                    if m not in public_urls:
-                        public_urls.append(m)
-                        show_ready(m)
-            if "Could not create share link" in line:
-                share_failed = True
-            if "Running on local URL" in line and not local_ready:
-                local_ready = True
-                proxy = colab_proxy_url(cfg.port)
-                if proxy:
-                    show_ready(proxy, "LINK DỰ PHÒNG (Colab proxy – mở bằng tài khoản đang chạy Colab)")
-                    print("   (link gradio.live sẽ hiện thêm bên dưới nếu tạo được – thường mất 10–60 s)\n", flush=True)
-            if share_failed and local_ready and cfg.tunnel in ("gradio.live", "both") and "gradio.live" not in "".join(public_urls):
-                print("\n⚠ gradio.live không tạo được link lúc này. Hãy dùng LINK DỰ PHÒNG ở trên, "
-                      "hoặc đặt TUNNEL=ngrok (cell 1) rồi chạy lại cell 6.\n", flush=True)
-                share_failed = False
-            if not wait and (local_ready and (public_urls or cfg.tunnel == "none")):
-                break
-            if ready_timeout and time.time() - t0 > ready_timeout:
-                break
-            if not wait and proc.poll() is not None:
-                break
-        if wait:
-            proc.wait()
+        for pat in URL_PATTERNS:
+            for m in pat.findall(line):
+                if m not in public_urls:
+                    public_urls.append(m)
+                    show_ready(m)
+                    _save_urls(public_urls, proxy)
+        if "Could not create share link" in line:
+            share_failed = True
+        if "Running on local URL" in line and not local_ready:
+            local_ready = True
+            proxy = colab_proxy_url(cfg.port)
+            _save_urls(public_urls, proxy)
+            if proxy:
+                show_ready(proxy, "LINK DỰ PHÒNG (Colab proxy – mở bằng tài khoản đang chạy Colab)")
+                print("   (link gradio.live sẽ hiện thêm bên dưới nếu tạo được – thường mất 10–60 s)\n", flush=True)
+            if quiet_after_ready:
+                print("   (từ đây chỉ in các dòng log quan trọng; log đầy đủ ở", LAUNCH_LOG, ")\n", flush=True)
+        if share_failed and local_ready and cfg.tunnel in ("gradio.live", "both") and \
+                "gradio.live" not in "".join(public_urls):
+            print("\n⚠ gradio.live không tạo được link lúc này. Hãy dùng LINK DỰ PHÒNG ở trên, "
+                  "hoặc đặt TUNNEL=ngrok (cell 1) rồi chạy lại cell 6.\n", flush=True)
+            share_failed = False
+        if not wait and (local_ready and (public_urls or cfg.tunnel == "none")):
+            return False
+        if ready_timeout and time.time() - t0 > ready_timeout:
+            return False
+        return True
+
+    interrupted = False
+    try:
+        with LAUNCH_LOG.open("rb") as f:
+            if not from_start:
+                f.seek(0, os.SEEK_END)
+            while True:
+                chunk = f.read(65536)
+                if chunk:
+                    buf += chunk.decode("utf-8", errors="replace")
+                    *lines, buf = buf.split("\n")
+                    for ln in lines:
+                        if not handle(ln + "\n"):
+                            return public_urls
+                    continue
+                if not alive():
+                    if buf:
+                        handle(buf + "\n")
+                    break
+                if not wait and ready_timeout and time.time() - t0 > ready_timeout:
+                    return public_urls
+                time.sleep(0.5)
     except KeyboardInterrupt:
         interrupted = True
-        print("\n⏹ Dừng Forge …", flush=True)
-        proc.terminate()
-        try:
-            proc.wait(10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-    finally:
-        logf.close()
-    if wait and not interrupted:
-        diagnose(tail, proc.returncode)
-    return proc, public_urls
+        print("\n⏸ Đã ngừng theo dõi log – Forge VẪN CHẠY NỀN, link vẫn dùng được.\n"
+              "   Lấy lại link: cell 🔗 (Nối lại). Dừng hẳn Forge: cell 🔗 với ACTION = Dừng.", flush=True)
+    if wait and not interrupted and not alive():
+        rc = proc.returncode if proc is not None else None
+        diagnose(tail, rc)
+    return public_urls
+
+
+def reconnect(cfg: Config | None = None, action: str = "link") -> None:
+    """Cell 🔗: 'link' = in lại link (khởi chạy lại nếu Forge đã chết) | 'restart' | 'stop'."""
+    cfg = cfg or Config.load()
+    banner("🔗 Nối lại với Forge")
+    if action == "stop":
+        stop_forge()
+        return
+    if action == "restart":
+        stop_forge()
+        launch(cfg)
+        return
+    if forge_alive(cfg):
+        info = saved_urls()
+        urls = info.get("public") or urls_from_log()
+        proxy = colab_proxy_url(cfg.port) or info.get("proxy")
+        log(f"Forge đang chạy (pid {forge_pids()}, cổng {cfg.port} mở) – link hiện tại:")
+        for u in urls:
+            show_ready(u)
+        if proxy:
+            show_ready(proxy, "LINK DỰ PHÒNG (Colab proxy)")
+        if not urls and cfg.tunnel != "none":
+            log("⚠ chưa thấy link gradio.live trong log – gradio.live có thể đang lỗi; dùng link dự phòng, "
+                "hoặc ACTION = Khởi động lại.")
+        print("\nĐang tiếp tục theo dõi log (bấm ⏹ để ngừng theo dõi, Forge vẫn chạy)…\n", flush=True)
+        follow_log(cfg, None, wait=True, from_start=False)
+    else:
+        if forge_pids():
+            log(f"Forge đang khởi động (pid {forge_pids()}), cổng {cfg.port} chưa mở – theo dõi log:")
+            follow_log(cfg, None, wait=True, from_start=True)
+        else:
+            log("Forge KHÔNG chạy (runtime có thể đã bị Colab thu hồi / khởi động lại) → khởi chạy lại…")
+            if not (Paths.forge / "launch.py").exists() or not Paths.python().exists():
+                log("⚠ môi trường không còn (Colab đã reset máy) → cần chạy lại cell 3 → 4 → 6.")
+                return
+            launch(cfg)
 
 
 def doctor(cfg: Config | None = None, n: int = 80) -> None:
@@ -1377,15 +1548,10 @@ def doctor(cfg: Config | None = None, n: int = 80) -> None:
         log("RAM: " + " | ".join(" ".join(m.split()) for m in mem))
     except Exception:  # noqa: BLE001
         pass
-    running = []
-    marker = str(Paths.forge / "launch.py")
-    for pid_dir in Path("/proc").glob("[0-9]*"):
-        try:
-            if marker in (pid_dir / "cmdline").read_bytes().decode(errors="ignore"):
-                running.append(pid_dir.name)
-        except Exception:  # noqa: BLE001
-            pass
-    log(f"Forge đang chạy ngầm: {running or 'không'}")
+    running = forge_pids()
+    log(f"Forge đang chạy ngầm: {running or 'không'} | cổng {cfg.port}: {'mở' if port_open(cfg.port) else 'đóng'}")
+    for u in saved_urls().get("public", []):
+        log(f"link gần nhất: {u}")
     model = dest_for(MODEL_FILES["noobai_xl_eps_1_1"])
     log(f"model: {model} → {'OK ' + human(model.stat().st_size) if model.exists() else 'CHƯA có'}")
     if LAUNCH_LOG.exists():

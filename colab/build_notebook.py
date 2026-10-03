@@ -170,13 +170,68 @@ if not ok:
 '''
 
 LAUNCH_CODE = '''#@title 6️⃣ 🚀 Khởi chạy giao diện (link gradio.live sẽ hiện ở đây)
-#@markdown Cell này chạy liên tục trong lúc bạn dùng WebUI. Muốn dừng: bấm ⏹ của cell.
+#@markdown Forge chạy **nền độc lập** với cell này: trình duyệt mất kết nối hay cell bị ngắt thì Forge vẫn sống, link vẫn dùng được – chạy cell 🔗 để lấy lại link. Cell này chỉ theo dõi log (sau khi UI lên chỉ in dòng quan trọng). Muốn dừng hẳn Forge: cell 🔗 với ACTION = Dừng.
 import importlib, sys
 sys.path.insert(0, "/content")
 import noobai_lib as L
 importlib.reload(L)
 cfg = L.Config.load()
-L.launch(cfg)
+if L.forge_alive(cfg):
+    print("Forge đang chạy sẵn → chỉ lấy lại link (muốn khởi động lại: cell 🔗, ACTION = Khởi động lại)")
+    L.reconnect(cfg, "link")
+else:
+    L.launch(cfg)
+'''
+
+RECONNECT_CODE = '''#@title 🔗 Nối lại sau khi Colab mất kết nối: lấy lại link / khởi động lại / dừng
+#@markdown - **Lấy lại link**: Forge còn sống → in lại link; đã chết → tự khởi chạy lại (môi trường còn thì ~1 phút).
+#@markdown - Nếu Colab đã **reset máy** (mất /content) cell sẽ báo → chạy lại cell 3 → 4 → 6 (model trên Drive không phải tải lại nếu đã bật LINK_DRIVE_MODELS và để model trong Drive/NoobAI/models).
+ACTION = "Lấy lại link"  #@param ["Lấy lại link", "Khởi động lại", "Dừng"]
+import importlib, sys
+sys.path.insert(0, "/content")
+try:
+    import noobai_lib as L
+except ModuleNotFoundError:
+    raise SystemExit("⚠ /content/noobai_lib.py không còn → Colab đã reset máy. Chạy lại từ cell 1 (cell 2 → 3 → 4 → 6).")
+importlib.reload(L)
+L.reconnect(L.Config.load(), {"Lấy lại link": "link", "Khởi động lại": "restart", "Dừng": "stop"}[ACTION])
+'''
+
+KEEPALIVE_CODE = '''#@title ⏱ Chống Colab tự ngắt kết nối (đọc kỹ rồi làm theo)
+#@markdown Colab miễn phí ngắt phiên khi **tab Colab không có tương tác ~90 phút** (dù bạn đang dùng gradio.live ở tab khác), tối đa 12 h/phiên, và có thể thu hồi GPU bất kỳ lúc nào. Cell này in **trạng thái** và **đoạn JS giữ phiên** để bạn dán vào Console của trình duyệt (F12 → Console) **trên tab Colab**. Lưu ý: tự động hoá tương tác có thể vi phạm điều khoản Colab – dùng có chừng mực, tự chịu trách nhiệm; cách an toàn nhất là thỉnh thoảng quay lại tab Colab bấm vào đâu đó, hoặc dùng Colab Pro (background execution).
+import importlib, sys, time
+sys.path.insert(0, "/content")
+import noobai_lib as L
+importlib.reload(L)
+cfg = L.Config.load()
+print("Forge:", "đang chạy ✅" if L.forge_alive(cfg) else "KHÔNG chạy ❌ (chạy cell 🔗)")
+info = L.saved_urls()
+for u in info.get("public", []):
+    print("Link:", u)
+try:
+    import subprocess
+    print(subprocess.run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu", "--format=csv,noheader"],
+                         capture_output=True, text=True, timeout=10).stdout.strip())
+except Exception:
+    pass
+print("""
+──── Dán vào Console (F12) của TAB COLAB rồi Enter – cứ 60 s sẽ "chạm" vào trang để Colab không coi là bỏ không ────
+(function(){
+  if (window._noobKeep) clearInterval(window._noobKeep);
+  window._noobKeep = setInterval(function(){
+    try {
+      var btn = document.querySelector("colab-connect-button");
+      if (btn && btn.shadowRoot) { var b = btn.shadowRoot.querySelector("#connect"); if (b) b.click(); }
+      document.dispatchEvent(new MouseEvent("mousemove", {bubbles:true}));
+      console.log("NoobAI keep-alive", new Date().toLocaleTimeString());
+    } catch(e) { console.log("keep-alive lỗi", e); }
+  }, 60000);
+  console.log("NoobAI keep-alive: BẬT (tắt bằng clearInterval(window._noobKeep))");
+})();
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Mẹo thêm: • Giữ tab Colab mở (không thu nhỏ trình duyệt). • Ảnh đã lưu thẳng vào Drive/NoobAI/outputs nên mất phiên cũng không mất ảnh.
+• Mất kết nối rồi nối lại được (Runtime ▸ Reconnect) → chạy cell 🔗. • Báo "Your session crashed after using all available RAM":
+  giảm batch size, đóng tab/ứng dụng khác của Colab, hoặc thêm `--always-low-vram` vào EXTRA_ARGS.""")
 '''
 
 DOCTOR_CODE = '''#@title 🩺 Chẩn đoán khi không thấy link / Forge thoát sớm
@@ -281,6 +336,8 @@ Trong UI: dropdown **📐 Độ phân giải chuẩn** nằm ngay dưới Width/
 ## 🛠 Xử lý sự cố
 | Hiện tượng | Cách xử lý |
 |---|---|
+| **Colab tự ngắt kết nối** | Phân biệt 2 trường hợp: (a) chỉ mất kết nối trình duyệt (góc phải báo *Reconnect*, RAM/Disk vẫn hiện) → bấm Reconnect, chạy cell **🔗** là có lại link, Forge chưa hề tắt; (b) runtime bị thu hồi (máy mới, /content trống) → chạy lại cell 2 → 3 → 4 → 6 (ảnh đã nằm trên Drive). Nguyên nhân thường gặp: tab Colab bỏ không ~90 phút trong khi bạn dùng gradio.live ở tab khác → xem cell **⏱** |
+| Link gradio.live cũ không mở được | Forge đã tắt theo runtime → cell 🔗; nếu Forge còn sống mà gradio.live lỗi → cell 🔗 ACTION = Khởi động lại, hoặc dùng link dự phòng |
 | Không thấy link gradio.live | Cell 6 luôn in thêm **LINK DỰ PHÒNG (Colab proxy)** ngay khi UI lên – dùng link đó. Nếu cell 6 *kết thúc* (không chạy mãi) tức Forge đã thoát: chạy cell 🩺 để xem lỗi, hoặc đổi `TUNNEL = ngrok` |
 | `CUDA out of memory` | Giảm kích thước ảnh / batch, tắt ControlNet, hoặc thêm `--always-low-vram` vào EXTRA_ARGS |
 | Model không hiện trong danh sách | Chạy lại cell 4 (tải sẽ tiếp tục nếu bị đứt), bấm 🔄 Refresh trong UI |
@@ -331,6 +388,8 @@ def build() -> dict:
         code(DOWNLOAD_CODE, cellview="form"),
         code(TEST_CODE, cellview="form"),
         code(LAUNCH_CODE, cellview="form"),
+        code(RECONNECT_CODE, cellview="form"),
+        code(KEEPALIVE_CODE, cellview="form"),
         code(DOCTOR_CODE, cellview="form"),
         md(GUIDE_MD),
         code(EXTRA_DL_CODE, cellview="form"),
