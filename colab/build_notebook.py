@@ -156,6 +156,14 @@ cfg = L.Config.load()
 L.launch(cfg)
 '''
 
+DOCTOR_CODE = '''#@title 🩺 Chẩn đoán khi không thấy link / Forge thoát sớm
+import importlib, sys
+sys.path.insert(0, "/content")
+import noobai_lib as L
+importlib.reload(L)
+L.doctor(L.Config.load())
+'''
+
 EXTRA_DL_CODE = '''#@title 🧰 (Tuỳ chọn) Tải thêm model / LoRA / embedding bất kỳ lúc nào { display-mode: "form" }
 #@markdown Dán link rồi chạy. Sau đó trong WebUI bấm nút 🔄 Refresh cạnh danh sách model/LoRA là thấy ngay (không cần khởi động lại).
 URL = ""  #@param {type:"string"}
@@ -208,7 +216,7 @@ worst quality, old, early, low quality, lowres, signature, username, logo, bad h
 ## 🛠 Xử lý sự cố
 | Hiện tượng | Cách xử lý |
 |---|---|
-| Không thấy link gradio.live | Đợi thêm 30–60 s; hoặc đổi `TUNNEL = ngrok` (cần token miễn phí tại ngrok.com) |
+| Không thấy link gradio.live | Cell 6 luôn in thêm **LINK DỰ PHÒNG (Colab proxy)** ngay khi UI lên – dùng link đó. Nếu cell 6 *kết thúc* (không chạy mãi) tức Forge đã thoát: chạy cell 🩺 để xem lỗi, hoặc đổi `TUNNEL = ngrok` |
 | `CUDA out of memory` | Giảm kích thước ảnh / batch, tắt ControlNet, hoặc thêm `--always-low-vram` vào EXTRA_ARGS |
 | Model không hiện trong danh sách | Chạy lại cell 4 (tải sẽ tiếp tục nếu bị đứt), bấm 🔄 Refresh trong UI |
 | Colab báo "disallowed code" | Giới hạn của Colab miễn phí với WebUI – cân nhắc Colab Pro |
@@ -241,6 +249,7 @@ def build() -> dict:
         code(DOWNLOAD_CODE, cellview="form"),
         code(TEST_CODE, cellview="form"),
         code(LAUNCH_CODE, cellview="form"),
+        code(DOCTOR_CODE, cellview="form"),
         md(GUIDE_MD),
         code(EXTRA_DL_CODE, cellview="form"),
         code(BACKUP_CODE, cellview="form"),

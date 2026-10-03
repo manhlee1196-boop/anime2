@@ -1033,32 +1033,127 @@ URL_PATTERNS = [
 ]
 
 
+LAUNCH_LOG = ROOT / "noobai_launch.log"
+
+KNOWN_ERRORS = [
+    ("Your device does not support the current version of Torch/CUDA",
+     "Torch không thấy GPU. Kiểm tra Runtime ▸ Change runtime type = GPU, rồi chạy lại cell 3 (cài) và cell 6."),
+    ("CUDA out of memory", "Hết VRAM. Giảm kích thước ảnh / tắt ControlNet, hoặc thêm `--always-low-vram` vào EXTRA_ARGS."),
+    ("Cannot find empty port", "Cổng 7860 đang bị một Forge cũ chiếm. Chạy lại cell 6 (bộ cài sẽ tự dọn tiến trình cũ)."),
+    ("address already in use", "Cổng 7860 đang bị chiếm. Chạy lại cell 6 (bộ cài sẽ tự dọn tiến trình cũ)."),
+    ("ModuleNotFoundError", "Thiếu thư viện Python. Chạy lại cell 3 (cài đặt) rồi cell 6."),
+    ("Could not create share link", "gradio.live không tạo được link. Dùng LINK DỰ PHÒNG (Colab proxy) in bên dưới, hoặc đổi TUNNEL=ngrok."),
+    ("No module named 'xformers'", "xformers lỗi. Đặt USE_XFORMERS=False ở cell 1, chạy lại cell 1 và 6."),
+    ("Killed", "Tiến trình bị hệ thống kill (hết RAM). Dùng runtime High-RAM hoặc tắt bớt extension."),
+    ("No checkpoints found", "Chưa có model. Chạy lại cell 4 (tải tài nguyên)."),
+]
+
+
+def kill_stale_forge() -> None:
+    """Dọn tiến trình Forge cũ còn chạy ngầm (ví dụ cell trước bị văng) để không kẹt cổng."""
+    me = os.getpid()
+    marker = str(Paths.forge / "launch.py")
+    killed = 0
+    for pid_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            pid = int(pid_dir.name)
+            if pid == me:
+                continue
+            cmd = (pid_dir / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+            if marker in cmd:
+                os.kill(pid, 15)
+                killed += 1
+        except Exception:  # noqa: BLE001
+            continue
+    if killed:
+        log(f"đã dừng {killed} tiến trình Forge cũ")
+        time.sleep(3)
+
+
+def colab_proxy_url(port: int) -> str | None:
+    """Link dự phòng qua proxy của Colab (chỉ người đang đăng nhập Colab mở được)."""
+    try:
+        from google.colab.output import eval_js  # type: ignore
+        return str(eval_js(f"google.colab.kernel.proxyPort({port})", timeout_sec=20)).rstrip("/")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def diagnose(lines: list[str], returncode: int | None) -> None:
+    print("\n" + "!" * 70, flush=True)
+    print(f"!  Forge đã THOÁT (mã {returncode}). Log đầy đủ: {LAUNCH_LOG}", flush=True)
+    text = "\n".join(lines)
+    hints = [h for key, h in KNOWN_ERRORS if key in text]
+    if hints:
+        print("!  Nguyên nhân có thể:", flush=True)
+        for h in dict.fromkeys(hints):
+            print(f"!   • {h}", flush=True)
+    err_lines = [ln for ln in lines if re.search(r"Traceback|Error|error:|Exception|Killed", ln)]
+    if err_lines:
+        print("!  Các dòng lỗi cuối:", flush=True)
+        for ln in err_lines[-8:]:
+            print("!    " + ln.rstrip()[:200], flush=True)
+    print("!  → Chạy cell 🩺 Chẩn đoán để xem 80 dòng log cuối, hoặc gửi file log để được hỗ trợ.", flush=True)
+    print("!" * 70 + "\n", flush=True)
+
+
 def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), ready_timeout: int = 0):
     banner("Khởi chạy NoobAI-XL 1.1 (Forge)")
     py = Paths.python()
+    if not py.exists() or not (Paths.forge / "launch.py").exists():
+        raise RuntimeError("Chưa cài đặt – hãy chạy cell 3 (Cài đặt) trước.")
+    kill_stale_forge()
     fix_opencv_if_no_libgl()
     args = build_args(cfg) + list(extra_args)
     log("COMMANDLINE_ARGS = " + " ".join(args))
+    log(f"log được ghi vào {LAUNCH_LOG}")
     env = {**os.environ, **pip_env(), "COMMANDLINE_ARGS": " ".join(args), "PYTHONUNBUFFERED": "1",
-           "GRADIO_ANALYTICS_ENABLED": "False", "HF_HUB_DISABLE_TELEMETRY": "1"}
+           "GRADIO_ANALYTICS_ENABLED": "False", "HF_HUB_DISABLE_TELEMETRY": "1", "PYTHONIOENCODING": "utf-8"}
     if cfg.hf_token:
         env["HF_TOKEN"] = cfg.hf_token
     proc = subprocess.Popen([str(py), "launch.py"], cwd=str(Paths.forge), env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            encoding="utf-8", errors="replace", bufsize=1)
     public_urls: list[str] = []
     local_ready = False
+    share_failed = False
+    interrupted = False
+    tail: list[str] = []
     t0 = time.time()
+    logf = LAUNCH_LOG.open("w", encoding="utf-8")
+
+    def show_ready(url: str, label: str = "GIAO DIỆN ĐÃ SẴN SÀNG") -> None:
+        print("\n" + "★" * 70 + f"\n★  {label} → {url}\n" + "★" * 70 + "\n", flush=True)
+
     try:
         for line in proc.stdout:  # type: ignore[union-attr]
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            logf.write(line)
+            logf.flush()
+            tail.append(line)
+            if len(tail) > 400:
+                del tail[:100]
+            try:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except Exception:  # noqa: BLE001
+                pass
             for pat in URL_PATTERNS:
                 for m in pat.findall(line):
                     if m not in public_urls:
                         public_urls.append(m)
-                        print("\n" + "★" * 70 + f"\n★  GIAO DIỆN ĐÃ SẴN SÀNG → {m}\n" + "★" * 70 + "\n", flush=True)
-            if "Running on local URL" in line:
+                        show_ready(m)
+            if "Could not create share link" in line:
+                share_failed = True
+            if "Running on local URL" in line and not local_ready:
                 local_ready = True
+                proxy = colab_proxy_url(cfg.port)
+                if proxy:
+                    show_ready(proxy, "LINK DỰ PHÒNG (Colab proxy – mở bằng tài khoản đang chạy Colab)")
+                    print("   (link gradio.live sẽ hiện thêm bên dưới nếu tạo được – thường mất 10–60 s)\n", flush=True)
+            if share_failed and local_ready and cfg.tunnel in ("gradio.live", "both") and "gradio.live" not in "".join(public_urls):
+                print("\n⚠ gradio.live không tạo được link lúc này. Hãy dùng LINK DỰ PHÒNG ở trên, "
+                      "hoặc đặt TUNNEL=ngrok (cell 1) rồi chạy lại cell 6.\n", flush=True)
+                share_failed = False
             if not wait and (local_ready and (public_urls or cfg.tunnel == "none")):
                 break
             if ready_timeout and time.time() - t0 > ready_timeout:
@@ -1068,13 +1163,57 @@ def launch(cfg: Config, *, wait: bool = True, extra_args: Iterable[str] = (), re
         if wait:
             proc.wait()
     except KeyboardInterrupt:
+        interrupted = True
         print("\n⏹ Dừng Forge …", flush=True)
         proc.terminate()
         try:
             proc.wait(10)
         except subprocess.TimeoutExpired:
             proc.kill()
+    finally:
+        logf.close()
+    if wait and not interrupted:
+        diagnose(tail, proc.returncode)
     return proc, public_urls
+
+
+def doctor(cfg: Config | None = None, n: int = 80) -> None:
+    """Cell 🩺: tóm tắt trạng thái + 80 dòng log cuối của lần khởi chạy gần nhất."""
+    cfg = cfg or Config.load()
+    banner("🩺 Chẩn đoán")
+    log(f"Python hệ thống {platform.python_version()} | GPU: {gpu_name()} | Colab: {is_colab()}")
+    log(f"Forge: {'có' if (Paths.forge / 'launch.py').exists() else 'CHƯA cài'} | venv: {'có' if Paths.python().exists() else 'CHƯA có'}")
+    free = shutil.disk_usage(str(ROOT)).free
+    log(f"đĩa trống: {human(free)}")
+    try:
+        mem = [ln for ln in Path("/proc/meminfo").read_text().splitlines() if ln.startswith(("MemTotal", "MemAvailable"))]
+        log("RAM: " + " | ".join(" ".join(m.split()) for m in mem))
+    except Exception:  # noqa: BLE001
+        pass
+    running = []
+    marker = str(Paths.forge / "launch.py")
+    for pid_dir in Path("/proc").glob("[0-9]*"):
+        try:
+            if marker in (pid_dir / "cmdline").read_bytes().decode(errors="ignore"):
+                running.append(pid_dir.name)
+        except Exception:  # noqa: BLE001
+            pass
+    log(f"Forge đang chạy ngầm: {running or 'không'}")
+    model = dest_for(MODEL_FILES["noobai_xl_eps_1_1"])
+    log(f"model: {model} → {'OK ' + human(model.stat().st_size) if model.exists() else 'CHƯA có'}")
+    if LAUNCH_LOG.exists():
+        lines = LAUNCH_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        print(f"\n--- {n} dòng cuối của {LAUNCH_LOG} ({len(lines)} dòng) ---")
+        for ln in lines[-n:]:
+            print(ln[:300])
+        text = "\n".join(lines)
+        hints = [h for key, h in KNOWN_ERRORS if key in text]
+        if hints:
+            print("\nGợi ý:")
+            for h in dict.fromkeys(hints):
+                print(" •", h)
+    else:
+        print("\nChưa có log khởi chạy – hãy chạy cell 6 trước.")
 
 
 # --------------------------------------------------------------------------------------
