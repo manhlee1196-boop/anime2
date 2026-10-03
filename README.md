@@ -21,6 +21,7 @@ trên nền **Stable Diffusion WebUI Forge**, chia sẻ giao diện qua **gradio
 | Tự fix | **Hires. fix** (4x-AnimeSharp ×1.5, denoise 0.4) và **ADetailer** (mặt `face_yolov8n` + tay `hand_yolov8n`) mở sẵn khi vào UI – `AUTO_HIRES_FIX` / `AUTO_ADETAILER` ở cell 1 |
 | Giao diện | **Tiếng Việt** (song ngữ, giữ thuật ngữ Prompt/Seed/CFG/LoRA…) – `colab/vi_VN.json`, ~830 chuỗi; đổi `UI_LANGUAGE = en` để dùng tiếng Anh |
 | GPU | `GPU_MODE = max` (mặc định): `--always-high-vram` (T4) / `--always-gpu` (≥ 20 GB) + `--cuda-malloc` + `--vae-in-fp16` → model nằm hẳn trên GPU, không hoán đổi; `balanced` / `lowvram` khi cần ảnh rất lớn |
+| 🩹 Fix mắt/tay/chân | 5 style **Noob ✦ Fix mắt / tay / chân / mắt+tay+chân** + prompt ADetailer riêng cho mặt và tay; bảng tag đầy đủ: [docs/prompt_fix_mat_tay_chan.md](docs/prompt_fix_mat_tay_chan.md) |
 | Chống mất kết nối | Forge chạy **nền độc lập** với cell (session riêng, log ra file); mất kết nối/ngắt cell không làm tắt Forge; cell 🔗 lấy lại link / khởi động lại / dừng; cell ⏱ hướng dẫn giữ phiên |
 | Kiểm tra | Cell tự kiểm tra môi trường/model/phiên bản thư viện/bản dịch trước khi chạy |
 

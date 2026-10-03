@@ -31,7 +31,7 @@ from typing import Iterable
 # --------------------------------------------------------------------------------------
 # Hằng số / tài nguyên
 # --------------------------------------------------------------------------------------
-LIB_VERSION = "1.5.0"
+LIB_VERSION = "1.6.0"
 
 ROOT = Path(os.environ.get("NOOBAI_ROOT", "/content")).resolve()
 CONFIG_PATH = Path(os.environ.get("NOOBAI_CONFIG", str(ROOT / "noobai_config.json")))
@@ -208,6 +208,34 @@ NOOB_NEGATIVE = (
     "worst quality, old, early, low quality, lowres, signature, username, logo, bad hands, "
     "mutated hands, mammal, anthro, furry, ambiguous form, feral, semi-anthro"
 )
+
+# Bộ thẻ sửa MẮT / TAY / CHÂN (xem docs/prompt_fix_mat_tay_chan.md)
+FIX_EYES_POS = "detailed eyes, beautiful detailed eyes, looking at viewer, eye contact, eye focus"
+FIX_EYES_NEG = (
+    "bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra eyes, missing eye, lazy eye, "
+    "empty eyes, deformed eyes, misaligned eyes, blurry eyes, extra pupils"
+)
+FIX_HANDS_POS = "detailed hands, five fingers, fingernails"
+FIX_HANDS_NEG = (
+    "bad hands, mutated hands, malformed hands, deformed hands, poorly drawn hands, extra digits, fewer digits, "
+    "extra fingers, missing fingers, fused fingers, too many fingers, long fingers, extra hands, extra arms, "
+    "missing arms, disconnected limbs, floating limbs"
+)
+FIX_FEET_POS = "detailed legs, detailed feet, toes"
+FIX_FEET_NEG = (
+    "bad feet, bad legs, extra legs, missing legs, deformed feet, malformed feet, poorly drawn feet, fused toes, "
+    "extra toes, missing toes, twisted legs, bad knees, disconnected legs, extra limbs, bad proportions"
+)
+FIX_ALL_NEG = (
+    "bad anatomy, bad proportions, bad perspective, bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra eyes, "
+    "extra digits, fewer digits, extra fingers, missing fingers, fused fingers, malformed hands, extra arms, missing arms, "
+    "bad feet, bad legs, extra legs, missing legs, fused toes, extra toes, disconnected limbs, extra limbs"
+)
+# Prompt ADetailer mặc định (bộ 1 = mặt, bộ 2 = tay)
+AD_FACE_PROMPT = "detailed face, beautiful detailed eyes, symmetrical eyes, looking at viewer, eye contact"
+AD_FACE_NEG = "bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, blurry, lowres"
+AD_HAND_PROMPT = "detailed hands, five fingers, natural hand pose, fingernails"
+AD_HAND_NEG = "bad hands, extra digits, fewer digits, fused fingers, mutated hands, extra fingers, missing fingers"
 
 
 # --------------------------------------------------------------------------------------
@@ -1092,8 +1120,14 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
             ui[f"{tab}/ADetailer detector 2nd/value"] = "hand_yolov8n.pt" if ad == "face+hand" else "None"
             ui[f"{tab}/Detection model confidence threshold 2nd/value"] = 0.3
             ui[f"{tab}/Inpaint denoising strength 2nd/value"] = 0.4
+            # prompt sửa mặt/mắt (bộ 1) và tay (bộ 2); ghi cả 2 dạng khoá để chắc chắn khớp ui-config của Forge
+            for prefix in ("", "customscript/!adetailer.py/"):
+                ui[f"{prefix}{tab}/ad_prompt/value"] = AD_FACE_PROMPT
+                ui[f"{prefix}{tab}/ad_negative_prompt/value"] = AD_FACE_NEG
+                ui[f"{prefix}{tab}/ad_prompt 2nd/value"] = AD_HAND_PROMPT
+                ui[f"{prefix}{tab}/ad_negative_prompt 2nd/value"] = AD_HAND_NEG
     _merge_json(Paths.forge / "ui-config.json", ui)
-    log("✔ ui-config.json (prompt / steps / hires / ADetailer mặc định)")
+    log("✔ ui-config.json (prompt / steps / hires / ADetailer mặc định + prompt sửa mặt, tay)")
 
     tools = {
         "auto_hires_fix": bool(cfg.auto_hires_fix),
@@ -1117,6 +1151,11 @@ def write_settings(cfg: Config, drive_info: dict | None = None) -> None:
         ("Noob ✦ Phong cách: cinematic", "{prompt}, cinematic lighting, depth of field, volumetric lighting, dramatic shadows", "flat lighting"),
         ("Noob ✦ Phong cách: 90s anime", "{prompt}, 1990s \\(style\\), retro artstyle, film grain", ""),
         ("Noob ✦ Negative: tay/anatomy", "{prompt}", NOOB_NEGATIVE + ", extra fingers, fewer fingers, extra digits, missing fingers, malformed limbs, extra arms, extra legs, deformed, disfigured"),
+        ("Noob ✦ Fix mắt", "{prompt}, " + FIX_EYES_POS, FIX_EYES_NEG),
+        ("Noob ✦ Fix tay", "{prompt}, " + FIX_HANDS_POS, FIX_HANDS_NEG),
+        ("Noob ✦ Fix chân", "{prompt}, " + FIX_FEET_POS, FIX_FEET_NEG),
+        ("Noob ✦ Fix mắt+tay+chân", "{prompt}, " + FIX_EYES_POS + ", " + FIX_HANDS_POS + ", " + FIX_FEET_POS, FIX_ALL_NEG),
+        ("Noob ✦ Fix mắt+tay+chân (gọn)", "{prompt}, detailed eyes, detailed hands, detailed feet", "bad anatomy, bad hands, bad feet, extra digits, fewer digits, extra limbs, cross-eyed, uneven eyes"),
         ("Noob ✦ Negative: chữ/watermark", "{prompt}", "text, watermark, signature, artist name, logo, patreon username, web address, speech bubble"),
     ]
     styles_path = Paths.forge / "styles.csv"

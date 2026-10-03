@@ -333,7 +333,21 @@ Trong UI: dropdown **📐 Độ phân giải chuẩn** nằm ngay dưới Width/
 ## ✨ Tự fix (đã bật sẵn, chỉnh ở cell 1)
 - **ADetailer** chạy sau mỗi ảnh: bộ 1 `face_yolov8n.pt` tìm và vẽ lại **mặt**, bộ 2 `hand_yolov8n.pt` vẽ lại **tay** (denoise 0.4). Mặt vẫn lỗi → tăng *Inpaint denoising strength* lên 0.5; ảnh nhiều người → giảm *Detection confidence* 0.3 → 0.25; không muốn sửa tay → chọn `face`.
 - **Hires. fix** như mục trên. Cả hai đều tắt được từng lần bằng cách bỏ tích trong UI; muốn tắt hẳn: `AUTO_HIRES_FIX = False` / `AUTO_ADETAILER = off` ở cell 1 → chạy lại cell 1 → `!python /content/noobai_lib.py settings` (hoặc chạy lại cell 3) → cell 6.
-- Ảnh vẫn lỗi tay: thêm style *Noob ✦ Negative: tay/anatomy*, hoặc ở gallery → *Gửi sang inpaint* → tô vùng tay → *Chỉ vùng tô*, denoise 0.5 → tạo lại vài lần.
+- ADetailer đã có sẵn prompt riêng: bộ 1 (mặt) `detailed face, beautiful detailed eyes, symmetrical eyes, looking at viewer, eye contact`; bộ 2 (tay) `detailed hands, five fingers, natural hand pose, fingernails` + negative tương ứng (sửa được trong mục ADetailer của UI).
+- Ảnh vẫn lỗi tay: thêm style *Noob ✦ Fix tay*, hoặc ở gallery → *Gửi sang inpaint* → tô vùng tay → *Chỉ vùng tô*, denoise 0.5 → tạo lại vài lần.
+
+## 🩹 Thẻ sửa MẮT – TAY – CHÂN (Styles có sẵn)
+Chọn ở ô **Styles** (cạnh nút Tạo ảnh), có thể chọn nhiều style cùng lúc. Bảng đầy đủ + mẹo inpaint: [docs/prompt_fix_mat_tay_chan.md](https://github.com/manhlee1196-boop/anime2/blob/main/docs/prompt_fix_mat_tay_chan.md).
+
+| Style | Thêm vào prompt | Thêm vào negative |
+|---|---|---|
+| **Noob ✦ Fix mắt** | `detailed eyes, beautiful detailed eyes, looking at viewer, eye contact, eye focus` | `bad eyes, cross-eyed, uneven eyes, asymmetrical eyes, extra eyes, missing eye, lazy eye, empty eyes, deformed eyes, misaligned eyes, blurry eyes, extra pupils` |
+| **Noob ✦ Fix tay** | `detailed hands, five fingers, fingernails` | `bad hands, mutated hands, malformed hands, deformed hands, poorly drawn hands, extra digits, fewer digits, extra fingers, missing fingers, fused fingers, too many fingers, long fingers, extra hands, extra arms, missing arms, disconnected limbs, floating limbs` |
+| **Noob ✦ Fix chân** | `detailed legs, detailed feet, toes` | `bad feet, bad legs, extra legs, missing legs, deformed feet, malformed feet, poorly drawn feet, fused toes, extra toes, missing toes, twisted legs, bad knees, disconnected legs, extra limbs, bad proportions` |
+| **Noob ✦ Fix mắt+tay+chân** | cả 3 dòng trên | `bad anatomy, bad proportions, bad perspective` + mắt + tay + chân (rút gọn) |
+| **Noob ✦ Fix mắt+tay+chân (gọn)** | `detailed eyes, detailed hands, detailed feet` | `bad anatomy, bad hands, bad feet, extra digits, fewer digits, extra limbs, cross-eyed, uneven eyes` |
+
+Mẹo quan trọng hơn cả negative: **ghi rõ tư thế tay/chân** trong prompt – `hand on hip`, `hands up`, `v`, `holding cup`, `arms behind back`, `hands in pockets`, `standing`, `sitting`, `crossed legs`, `seiza`… Tay có việc hoặc có tư thế cụ thể thì ít lỗi hẳn; ảnh không cần tay/chân → `upper body` / `cowboy shot` để cắt khung. Mắt lệch → thêm `looking at viewer, eye contact`, giảm CFG 5–6. Bàn chân nhỏ ở ảnh full body → giữ Hires fix hoặc inpaint vùng chân với `detailed feet, toes` denoise 0.45–0.55.
 
 ## 🚀 Dùng tối đa GPU
 - Cell 1 `GPU_MODE = max` (mặc định): Forge chạy với `--always-high-vram` (T4 15 GB) hoặc `--always-gpu` (L4/A100 ≥ 20 GB) → model, text encoder, VAE **nằm hẳn trên GPU**, không hoán đổi ra RAM giữa các bước; thêm `--cuda-malloc` và `--vae-in-fp16` (giải mã ảnh nhanh gấp ~2 trên T4 nhờ VAE fp16-fix). Cell 6 in rõ chế độ và lý do.
